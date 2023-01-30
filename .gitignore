@@ -1,79 +1,54 @@
-fish_history
-htmlcov
-*.DS_STORE
-*.dot
+*.py[cod]
+*.orig
+
+# C extensions
+*.c
+*.o
+*.so
+*.html
+
+# Packages
 *.egg
 *.egg-info
-*.mo
-*.o
-*.py.bak
-*.orig
-*.prof
-*.py[cod]
-*.so
-*.stats
-*.svg
-*.swp
-*.wpr
-*.wpu
-.DS_Store
-.cache
-.coverage
-.coverage.*
-.fuse*
-.idea/
+dist
+build
+eggs
+parts
+bin
+var
+sdist
+develop-eggs
 .installed.cfg
+lib
+lib64
+
+# Installer logs
+pip-log.txt
+
+# Unit test / coverage reports / profiling output
+.coverage
+.tox
+*.prof
+
+# Translations
+*.mo
+
+# Mr Developer
 .mr.developer.cfg
 .project
 .pydevproject
-.pytest_cache/
-.python-version
-__pycache__/
-.tox
-.vagrant/
-.vault_test_token
-.venv*
-Vagrantfile
-bin
+.idea
+
+# Configs
 config.json
-coverage
-coverage.xml
-dist/
-docker/testrunner*-timestamp
-eggs/
-env/
-gc_*.dot
-junit.xml
-node_modules/
-nosetests.xml
-pgdata/
-pypirc
-sdist
-_build/
-build/
-venv/
-tmp/
-pgdata/
-Pipfile.lock
-pip-wheel-metadata
-server/benchmarks/local/import/parquet*
-server/benchmarks/local/import/data/
-# the openapi.json file is generated during setup.py operations
-server/src/cr/server/api/static/openapi.json
-lib/src/cr/lib/_speed/*.html
-lib/src/cr/lib/_speed/*.c
+cluster.json
 
-lib/src/cr/lib/integrations/decipher/fixtures/surveys/benchmarks*
-lib/src/cr/lib/integrations/surveymonkey/fixtures/surveys/benchmarks/*
-# If you build devdocs from the github repositories, it will pull in devdocs/src
-devdocs/src
-cov.xml
+#Git artifacts
+*.rej
 
-#VS Code
-.vscode/
-/zoom.iml
+# other dev. stuff
+TAGS
+*.stats
+*.svg
 
-# local configs
-.local/
-/testvenv3
-/site-packages
+.DS_Store

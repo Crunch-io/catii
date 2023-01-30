@@ -6,6 +6,8 @@ from itertools import chain, islice
 
 import numpy
 
+from .set_operations import difference, intersection, union
+
 # These are similar to NumPy get/set_printoptions.
 _printoptions = {
     # Total number of index elements which trigger summarization
@@ -486,6 +488,21 @@ class iindex(dict):
             self.pop(key, None)
         else:
             self[key] = value.copy() if copy else value
+
+    def union_update(self, other):
+        """Update self, adding elements from other."""
+        for coords, rowids in other.items():
+            self.set_if(coords, union(self.get(coords), rowids))
+
+    def intersection_update(self, other):
+        """Update self, keeping only elements found in it and other."""
+        for coords, rowids in other.items():
+            self.set_if(coords, intersection(self.get(coords), rowids))
+
+    def difference_update(self, other):
+        """Update self, removing elements found in others."""
+        for coords, rowids in other.items():
+            self.set_if(coords, difference(self.get(coords), rowids))
 
     def full_items(self):
         """Return (coords, rowids) pairs from self plus (common, rowids)."""
