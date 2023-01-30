@@ -1,4 +1,4 @@
-# catii
+# catii ("cateyes" :heart_eyes_cat:)
 
 A library for N-dimensional categorical data.
 
