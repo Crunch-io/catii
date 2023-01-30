@@ -3,7 +3,13 @@ import re
 import numpy
 import pytest
 
-from catii.index import iindex
+from catii import iindex
+
+
+def pytest_raises(exctype, match=None, msg=None):
+    if match is None and msg is not None:
+        match = re.escape(msg)
+    return pytest.raises(exctype, match=match)
 
 
 class TestIndexCreation:
@@ -14,27 +20,64 @@ class TestIndexCreation:
         assert idx.shape == (8,)
 
     def test_type_errors(self):
-        with pytest.raises(
-            TypeError, match="iindex.shape MUST be of type 'tuple', not 8."
+        with pytest_raises(
+            TypeError, msg="iindex.shape MUST be of type 'tuple', not 8."
         ):
             iindex({}, 0, 8)
 
-        with pytest.raises(TypeError, match="Index coordinates MUST all be tuples."):
+        with pytest_raises(TypeError, msg="Index coordinates MUST all be tuples."):
             iindex({1: [0, 2, 7]}, 0, (8,))
 
-        with pytest.raises(
+        with pytest_raises(
             TypeError,
-            match=re.escape(
-                "Index array dtype is dtype('int64'), but expected dtype('uint32')."
-            ),
+            msg="Index array dtype is dtype('int64'), but expected dtype('uint32').",
         ):
             iindex({(1,): numpy.array([0, 2, 7], dtype=int)}, 0, (8,))
 
-        with pytest.raises(
-            TypeError,
-            match=re.escape("Index[(1,)] could not be converted to an array."),
+        with pytest_raises(
+            TypeError, msg="Index[(1,)] could not be converted to an array.",
         ):
             iindex({(1,): object()}, 0, (8,))
+
+
+class TestValidate:
+    def test_type_errors(self):
+        with pytest_raises(
+            ValueError,
+            msg="Found index shape with wrong types: {<class 'int'>, <class 'str'>}.",
+        ):
+            iindex({}, 0, ("a", 8)).validate()
+
+        with pytest_raises(ValueError, msg="Index[(1,)] contains NumPy coordinate 1."):
+            iindex({(numpy.array([1])[0],): [2]}, 0, (5,)).validate()
+
+        with pytest_raises(ValueError, msg="Index[(0,)] contains common value 0."):
+            iindex({(0,): [2]}, 0, (5,)).validate()
+
+        with pytest_raises(
+            ValueError, msg="Index[(1,)] is of dtype: float64 but should be uint32."
+        ):
+            ii = iindex({}, 0, (5,))
+            ii[(1,)] = numpy.array([2], dtype=float)
+            ii.validate()
+
+        with pytest_raises(ValueError, msg="Index[(1,)] is not a numpy array."):
+            ii = iindex({}, 0, (5,))
+            ii[(1,)] = "abc"
+            ii.validate()
+
+        with pytest_raises(ValueError, msg="Index[(1,)] is not unique."):
+            iindex({(1,): [2, 3, 4, 3]}, 0, (5,)).validate()
+
+        with pytest_raises(ValueError, msg="Index[(1,)] is not sorted."):
+            iindex({(1,): [4, 3, 2]}, 0, (5,)).validate()
+
+        with pytest_raises(
+            ValueError, msg="Index[(1,)] and [(2,)] contain the same rowids [2, 4]."
+        ):
+            iindex({(1,): [2, 3, 4], (2,): [1, 2, 4]}, 0, (5,)).validate(
+                check_comprehensive_unique=True
+            )
 
 
 class TestEquality:
@@ -87,8 +130,12 @@ class TestProperties:
         assert idx.abscissae == {1, 2}
         assert idx.sparsity == 50  # 50% of the values have been omitted
         assert idx.size == 4  # there are 4 entries total.
+        assert idx.shape == (4,)
+        assert idx.ndim == 1
 
-        assert iindex({}, common=0, shape=(0,)).sparsity == 0
+        idx = iindex({}, common=0, shape=(0,))
+        assert idx.sparsity == 0
+        assert idx.abscissae == set()
 
 
 class TestShiftCommon:
@@ -125,26 +172,77 @@ class TestShiftCommon:
         assert idx.common_rowids(0).tolist() == [1, 3, 4]
         assert idx.common_rowids(1).tolist() == [1]
 
+    def test_shift_common_explicit(self):
+        idx = iindex({(99,): [1, 3, 5], (88,): [2, 4, 6]}, common=0, shape=(10,))
+        idx.shift_common(99)
 
-class TestFullItems:
-    def test_full_items(self):
+        assert idx.common == 99
+        assert idx.to_dict() == {
+            (88,): [2, 4, 6],
+            (0,): [0, 7, 8, 9],
+        }
+
+
+class TestForce:
+    def test_items_force(self):
         idx = iindex({(99,): [1, 3, 5], (88,): [2, 4, 6]}, common=0, shape=(10,))
 
-        assert {idx: rows.tolist() for idx, rows in idx.full_items()} == {
+        assert {idx: rows.tolist() for idx, rows in idx.items(force=True)} == {
             (0,): [0, 7, 8, 9],
             (88,): [2, 4, 6],
             (99,): [1, 3, 5],
         }
 
-    def test_full_items2d(self):
+    def test_items_force_2d(self):
         idx = iindex({(99, 0): [1, 3, 4], (88, 1): [2, 3, 4]}, common=0, shape=(5, 2),)
 
-        assert {idx: rows.tolist() for idx, rows in idx.full_items()} == {
+        assert {idx: rows.tolist() for idx, rows in idx.items(force=True)} == {
             (0, 0): [0, 2],
             (0, 1): [0, 1],
             (88, 1): [2, 3, 4],
             (99, 0): [1, 3, 4],
         }
+
+    def test_get_force(self):
+        idx = iindex({(99,): [1, 3, 5], (88,): [2, 4, 6]}, common=0, shape=(10,))
+        assert idx.get((0,)) is None
+        assert idx.get((0,), force=True).tolist() == [0, 7, 8, 9]
+
+
+class TestSetIf:
+    def test_set_if(self):
+        idx = iindex({}, 0, (10,))
+        idx.set_if((1,), [1, 2])
+        assert idx.to_dict() == {(1,): [1, 2]}
+        idx.set_if((2,), [])
+        assert idx.to_dict() == {(1,): [1, 2]}
+        idx.set_if((2,), None)
+        assert idx.to_dict() == {(1,): [1, 2]}
+
+    def test_set_if_copy(self):
+        idx = iindex({}, 0, (10,))
+        arr = numpy.array([1, 2], dtype=numpy.uint32)
+        idx.set_if((1,), arr)
+        assert idx[(1,)] is not arr
+        idx.set_if((1,), arr, copy=False)
+        assert idx[(1,)] is arr
+
+
+class TestSetOpMethods:
+    def test_union_update(self):
+        idx = iindex({(1,): [1, 3]}, 0, (10,))
+        idx.union_update({(1,): [2, 4], (2,): [5]})
+        assert idx.to_dict() == {(1,): [1, 2, 3, 4], (2,): [5]}
+
+    def test_intersection_update(self):
+        idx = iindex({(1,): [1, 3], (3,): [9]}, 0, (10,))
+        idx.intersection_update({(1,): [2, 3], (2,): [5]})
+        assert idx.to_dict() == {(1,): [3]}
+
+    def test_difference_update(self):
+        idx = iindex({(1,): [1, 3, 5, 7], (3,): [9]}, 0, (10,))
+        idx.difference_update({(1,): [3, 7], (2,): [5]})
+        assert idx.to_dict() == {(1,): [1, 5], (3,): [9]}
 
 
 class TestCopy:
@@ -191,9 +289,9 @@ class TestReindexed:
 class TestRearrangeColumns:
     def test_rearrange(self):
         idx = iindex(
-            {(1, 1): [2], (2, 0): [1, 2], (3, 1): [0], (4, 2): [0], (5, 2): [1]},
+            {(1, 1): [2], (2, 0): [1, 2], (3, 1): [0], (4, 2): [0], (5, 3): [1]},
             common=0,
-            shape=(10,),
+            shape=(10, 4),
         )
 
         idx.rearrange_columns([2, 0, 1])
@@ -203,7 +301,8 @@ class TestRearrangeColumns:
             (2, 1): [1, 2],
             (3, 2): [0],
             (4, 0): [0],
-            (5, 0): [1],
+            # dropped because (,3) is not included in the order.
+            # (5, 3): [1],
         }
 
 
@@ -244,8 +343,45 @@ class TestSubsetting:
     def test_copy_subset_1d(self):
         idx = iindex({(99,): [1, 3, 5], (88,): [2, 4, 6]}, common=0, shape=(10,))
 
-        with pytest.raises(TypeError):
+        with pytest_raises(TypeError):
             idx.copy_subset([0, 3])
+
+    def test_slices1d(self):
+        # 1-D
+        idx = iindex({(1,): [1, 3, 5], (2,): [2, 4, 6]}, common=0, shape=(10,))
+        assert [ii.to_dict() for ii in idx.slices1d()] == [
+            {(1,): [1, 3, 5], (2,): [2, 4, 6]}
+        ]
+
+        # 2-D
+        idx = iindex(
+            {(1, 0): [1, 3], (2, 0): [4, 6], (1, 1): [5]}, common=0, shape=(10, 2)
+        )
+        assert [ii.to_dict() for ii in idx.slices1d()] == [
+            {(1,): [1, 3], (2,): [4, 6]},
+            {(1,): [5]},
+        ]
+
+        # 3-D
+        idx = iindex(
+            {(1, 0, 0): [1, 3], (2, 0, 0): [4, 6], (1, 0, 1): [5]},
+            common=0,
+            shape=(10, 2, 2),
+        )
+        assert [ii.to_dict() for ii in idx.slices1d()] == [
+            {(1,): [1, 3], (2,): [4, 6]},
+            # Important empty slice to allow aggregations to count 0.
+            {},
+            {(1,): [5]},
+            {},
+        ]
+
+        # 0-D
+        idx = iindex({}, common=0, shape=())
+        assert [ii.to_dict() for ii in idx.slices1d()] == [
+            # Important empty slice to allow aggregations to count 0.
+            {}
+        ]
 
 
 class TestToFromArray:
@@ -311,7 +447,7 @@ class TestToFromArray:
 
     def test_from_array_empty(self):
         # If no information is provided, we have to error.
-        with pytest.raises(ValueError):
+        with pytest_raises(ValueError):
             idx = iindex.from_array([])
 
         # If a mapping is provided, however, we can make an initial guess
@@ -352,12 +488,12 @@ class TestAppend:
     def test_append(self):
         idx = iindex({}, common=0, shape=(0,))
 
-        with pytest.raises(TypeError):
+        with pytest_raises(TypeError):
             idx.append([])
 
         idx.append(iindex({(99,): [1, 3], (88,): [2, 4]}, common=0, shape=(6,),))
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             (0,): [0, 5],
             (88,): [2, 4],
             (99,): [1, 3],
@@ -365,7 +501,7 @@ class TestAppend:
 
         idx.append(iindex({(99,): [1, 3], (88,): [2, 4]}, common=0, shape=(6,),))
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             (0,): [0, 5, 6, 11],
             (88,): [2, 4, 8, 10],
             (99,): [1, 3, 7, 9],
@@ -375,7 +511,7 @@ class TestAppend:
         idx = iindex({}, common=1, shape=(0,))
         idx.append(iindex({(99,): [1, 3], (88,): [2, 4]}, common=0, shape=(6,),))
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             (0,): [0, 5],
             (88,): [2, 4],
             (99,): [1, 3],
@@ -383,7 +519,7 @@ class TestAppend:
 
         idx.append(iindex({(88,): [1, 3]}, common=99, shape=(5,),))
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             (0,): [0, 5],
             (88,): [2, 4, 7, 9],
             (99,): [1, 3, 6, 8, 10],
@@ -395,7 +531,7 @@ class TestAppend:
             iindex({(99, 0): [1, 3, 4], (88, 1): [1, 2, 4]}, common=0, shape=(5, 2))
         )
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             (0, 0): [0, 2],
             (0, 1): [0, 3],
             (88, 1): [1, 2, 4],
@@ -406,7 +542,7 @@ class TestAppend:
             iindex({(99, 0): [1, 3, 4], (88, 1): [1, 2, 4]}, common=0, shape=(5, 2))
         )
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             (0, 0): [0, 2, 5, 7],
             (0, 1): [0, 3, 5, 8],
             (88, 1): [1, 2, 4, 6, 7, 9],
@@ -419,7 +555,7 @@ class TestAppend:
             iindex({(99, 0): [1, 3, 4], (88, 1): [1, 2, 4]}, common=0, shape=(5, 2))
         )
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             (0, 0): [0, 2],
             (0, 1): [0, 3],
             (88, 1): [1, 2, 4],
@@ -428,7 +564,7 @@ class TestAppend:
 
         idx.append(iindex({(88, 1): [1, 2, 4]}, common=99, shape=(5, 2),))
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             (0, 0): [0, 2],
             (0, 1): [0, 3],
             (88, 1): [1, 2, 4, 6, 7, 9],
@@ -437,12 +573,12 @@ class TestAppend:
         }
 
 
-class TestiindexUpdate:
+class TestUpdate:
     def test_update(self):
         idx = iindex({}, common=0, shape=(6,))
         idx.update({(99,): [1, 3], (88,): [2, 4]})
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             (0,): [0, 5],
             (88,): [2, 4],
             (99,): [1, 3],
@@ -450,7 +586,7 @@ class TestiindexUpdate:
 
         idx.update({(99,): [1, 3], (88,): [2, 4]})
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             (0,): [0, 5],
             (88,): [2, 4],
             (99,): [1, 3],
@@ -460,7 +596,7 @@ class TestiindexUpdate:
         idx = iindex({}, common=0, shape=(5, 2))
         idx.update({(99, 0): [1, 3, 4], (88, 1): [1, 2, 4]})
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             (0, 0): [0, 2],
             (0, 1): [0, 3],
             (88, 1): [1, 2, 4],
@@ -468,7 +604,7 @@ class TestiindexUpdate:
         }
 
         idx.update({(99, 0): [1, 3, 4], (88, 1): [1, 2, 4]})
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             (0, 0): [0, 2],
             (0, 1): [0, 3],
             (88, 1): [1, 2, 4],
@@ -476,7 +612,7 @@ class TestiindexUpdate:
         }
 
         idx.update({(99, 0): [1, 3, 4], (88, 1): [0, 1, 2]})
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             (0, 0): [0, 2],
             (0, 1): [3],
             (88, 1): [0, 1, 2, 4],

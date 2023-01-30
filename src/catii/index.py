@@ -54,9 +54,24 @@ def fit_dtype(maxval, minval=0):
 
 
 class iindex(dict):
-    """A map of coordinate tuples to sorted numpy arrays of row ids."""
+    """An N-dimensional inverted index.
+
+    A dict whose keys are coordinate tuples, and whose corresponding values are
+    sorted numpy arrays of row ids.
+    """
+
+    common = None
+    "The common value. Any rowid not mentioned in self's entries "
+    "is assumed to be this value."
+
+    shape = ()
+    "A tuple of dimensional extents, such as (3, 4) to mean three rows "
+    "and 4 columns. This should match that of an equivalent NumPy array. "
+    "May be the empty tuple to signify a zero-dimensional scalar value."
 
     ROWID_DTYPE = numpy.dtype(numpy.uint32)
+    rowid_dtype = ROWID_DTYPE
+    "The NumPy dtype of value arrays in self; numpy.uint32 by default."
 
     def __init__(self, entries, common, shape):
         if type(shape) is not tuple:
@@ -379,17 +394,13 @@ class iindex(dict):
 
         return cls(entries, common, values.shape)
 
-    def to_dict(self, full=False):
+    def to_dict(self, force=False):
         """Return a dict of {(coord, ...): [rowids]} pairs from self.
 
         The returned rowids will be Python lists rather than NumPy arrays.
         This can be especially helpful in tests.
         """
-        if full:
-            items = self.full_items()
-        else:
-            items = self.items()
-        return {coords: rowids.tolist() for coords, rowids in items}
+        return {coords: rowids.tolist() for coords, rowids in self.items(force)}
 
     @property
     def abscissae(self):
@@ -487,36 +498,62 @@ class iindex(dict):
         if value is None or len(value) == 0:
             self.pop(key, None)
         else:
+            value = numpy.asarray(value)
             self[key] = value.copy() if copy else value
 
     def union_update(self, other):
-        """Update self, adding elements from other."""
+        """Update self, adding elements from other.
+
+        If `other` is an iindex, its common value is not unioned--only its
+        explicit entries. You may need to shift_common() on self or other
+        before updating.
+        """
         for coords, rowids in other.items():
+            rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
             self.set_if(coords, union(self.get(coords), rowids))
 
     def intersection_update(self, other):
-        """Update self, keeping only elements found in it and other."""
+        """Update self, keeping only elements found in it and other.
+
+        If `other` is an iindex, its common value is not intersected--only its
+        explicit entries. You may need to shift_common() on self or other
+        before updating.
+        """
+        for coords in list(self.keys()):
+            if coords not in other:
+                del self[coords]
+
         for coords, rowids in other.items():
+            rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
             self.set_if(coords, intersection(self.get(coords), rowids))
 
     def difference_update(self, other):
-        """Update self, removing elements found in others."""
+        """Update self, removing elements found in others.
+
+        If `other` is an iindex, its common value is not differenced--only its
+        explicit entries. You may need to shift_common() on self or other
+        before updating.
+        """
         for coords, rowids in other.items():
+            rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
             self.set_if(coords, difference(self.get(coords), rowids))
 
-    def full_items(self):
-        """Return (coords, rowids) pairs from self plus (common, rowids)."""
-        if len(self.shape) == 1:
-            # Calculate common rowids lazily (using a generator comprehension)
-            # so if the caller stops iterating before iterating over all
-            # items in self, we don't calculate the expensive common rowids.
-            commons = (((self.common,), self.common_rowids()) for _ in [1])
+    def items(self, force=False):
+        """Return (coords, rowids) pairs from self, plus (common, rowids) if force."""
+        if force:
+            if len(self.shape) == 1:
+                # Calculate common rowids lazily (using a generator comprehension)
+                # so if the caller stops iterating before iterating over all
+                # items in self, we don't calculate the expensive common rowids.
+                commons = (((self.common,), self.common_rowids()) for _ in [1])
+            else:
+                commons = (
+                    ((self.common, colindex), self.common_rowids(colindex))
+                    for colindex in range(self.shape[1])
+                )
+            return chain(self.items(), commons)
         else:
-            commons = (
-                ((self.common, colindex), self.common_rowids(colindex))
-                for colindex in range(self.shape[1])
-            )
-        return chain(self.items(), commons)
+            return super().items()
 
     def reindexed(self, mapping, copy=True, shift=True, assume_unique=False):
         """Return a new iindex, whose entries contain mapped values.
@@ -583,7 +620,10 @@ class iindex(dict):
         return new_index
 
     def rearrange_columns(self, order):
-        """Rearrange the columns in self to the given order."""
+        """Rearrange the columns in self to the given order.
+
+        Any coordinates which are not in the given order are dropped from self.
+        """
         new_entries = dict(
             ((coords[0], order.index(coords[1])), rowids)
             for coords, rowids in self.items()
@@ -621,6 +661,7 @@ class iindex(dict):
         return new_index
 
     def copy(self):
+        """Return a copy of self."""
         return iindex(
             dict((coords, rowids.copy()) for coords, rowids in self.items()),
             self.common,
@@ -682,6 +723,13 @@ class iindex(dict):
             yield self
 
     def append(self, other):
+        """Vertically stack the given `other` index as new rows below self.
+
+        Any rowids in `other` will be incremented by self.shape[0].
+
+        The `other` iindex must be of the same type (its entries must mean
+        the same things as self), but it need not have the same common value.
+        """
         if not isinstance(other, iindex):
             raise TypeError(
                 "Can't append object of type %r to iindex." % (type(other),)

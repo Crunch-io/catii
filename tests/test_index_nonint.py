@@ -130,22 +130,22 @@ class TestShiftCommon:
         assert idx.common_rowids(1).tolist() == [1]
 
 
-class TestFullItems:
-    def test_full_items(self):
+class TestForce:
+    def test_items_force(self):
         idx = iindex({("99",): [1, 3, 5], ("88",): [2, 4, 6]}, common="0", shape=(10,))
 
-        assert {idx: rows.tolist() for idx, rows in idx.full_items()} == {
+        assert {idx: rows.tolist() for idx, rows in idx.items(force=True)} == {
             ("0",): [0, 7, 8, 9],
             ("88",): [2, 4, 6],
             ("99",): [1, 3, 5],
         }
 
-    def test_full_items2d(self):
+    def test_items_force_2d(self):
         idx = iindex(
             {("99", 0): [1, 3, 4], ("88", 1): [2, 3, 4]}, common="0", shape=(5, 2),
         )
 
-        assert {idx: rows.tolist() for idx, rows in idx.full_items()} == {
+        assert {idx: rows.tolist() for idx, rows in idx.items(force=True)} == {
             ("0", 0): [0, 2],
             ("0", 1): [0, 1],
             ("88", 1): [2, 3, 4],
@@ -378,7 +378,7 @@ class TestAppend:
 
         idx.append(iindex({("99",): [1, 3], ("88",): [2, 4]}, common="0", shape=(6,),))
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             ("0",): [0, 5],
             ("88",): [2, 4],
             ("99",): [1, 3],
@@ -386,7 +386,7 @@ class TestAppend:
 
         idx.append(iindex({("99",): [1, 3], ("88",): [2, 4]}, common="0", shape=(6,),))
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             ("0",): [0, 5, 6, 11],
             ("88",): [2, 4, 8, 10],
             ("99",): [1, 3, 7, 9],
@@ -396,7 +396,7 @@ class TestAppend:
         idx = iindex({}, common="1", shape=(0,))
         idx.append(iindex({("99",): [1, 3], ("88",): [2, 4]}, common="0", shape=(6,),))
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             ("0",): [0, 5],
             ("88",): [2, 4],
             ("99",): [1, 3],
@@ -404,7 +404,7 @@ class TestAppend:
 
         idx.append(iindex({("88",): [1, 3]}, common="99", shape=(5,),))
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             ("0",): [0, 5],
             ("88",): [2, 4, 7, 9],
             ("99",): [1, 3, 6, 8, 10],
@@ -418,7 +418,7 @@ class TestAppend:
             )
         )
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             ("0", 0): [0, 2],
             ("0", 1): [0, 3],
             ("88", 1): [1, 2, 4],
@@ -431,7 +431,7 @@ class TestAppend:
             )
         )
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             ("0", 0): [0, 2, 5, 7],
             ("0", 1): [0, 3, 5, 8],
             ("88", 1): [1, 2, 4, 6, 7, 9],
@@ -446,7 +446,7 @@ class TestAppend:
             )
         )
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             ("0", 0): [0, 2],
             ("0", 1): [0, 3],
             ("88", 1): [1, 2, 4],
@@ -455,7 +455,7 @@ class TestAppend:
 
         idx.append(iindex({("88", 1): [1, 2, 4]}, common="99", shape=(5, 2),))
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             ("0", 0): [0, 2],
             ("0", 1): [0, 3],
             ("88", 1): [1, 2, 4, 6, 7, 9],
@@ -469,7 +469,7 @@ class TestiindexUpdate:
         idx = iindex({}, common="0", shape=(6,))
         idx.update({("99",): [1, 3], ("88",): [2, 4]})
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             ("0",): [0, 5],
             ("88",): [2, 4],
             ("99",): [1, 3],
@@ -477,7 +477,7 @@ class TestiindexUpdate:
 
         idx.update({("99",): [1, 3], ("88",): [2, 4]})
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             ("0",): [0, 5],
             ("88",): [2, 4],
             ("99",): [1, 3],
@@ -487,7 +487,7 @@ class TestiindexUpdate:
         idx = iindex({}, common="0", shape=(5, 2))
         idx.update({("99", 0): [1, 3, 4], ("88", 1): [1, 2, 4]})
 
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             ("0", 0): [0, 2],
             ("0", 1): [0, 3],
             ("88", 1): [1, 2, 4],
@@ -495,7 +495,7 @@ class TestiindexUpdate:
         }
 
         idx.update({("99", 0): [1, 3, 4], ("88", 1): [1, 2, 4]})
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             ("0", 0): [0, 2],
             ("0", 1): [0, 3],
             ("88", 1): [1, 2, 4],
@@ -503,7 +503,7 @@ class TestiindexUpdate:
         }
 
         idx.update({("99", 0): [1, 3, 4], ("88", 1): [0, 1, 2]})
-        assert idx.to_dict(full=True) == {
+        assert idx.to_dict(force=True) == {
             ("0", 0): [0, 2],
             ("0", 1): [3],
             ("88", 1): [0, 1, 2, 4],
