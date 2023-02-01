@@ -328,6 +328,49 @@ class TestTransformMethods:
         # col 3 doesn't exist, so will be correctly ignored.
         assert idx.rearranged([0, 3]).to_dict() == {(99, 0): [1, 3, 4]}
 
+    def test_rearranged_multiaxis(self):
+        idx = iindex(
+            {
+                (1, 1, 0): [2],
+                (2, 0, 0): [1, 2],
+                (3, 1, 1): [0],
+                (4, 2, 1): [0],
+                (5, 3, 1): [1],
+            },
+            common=0,
+            shape=(10, 4, 2),
+        )
+
+        assert idx.rearranged([2, 0, 1], [1, 0]).to_dict() == {
+            (1, 2, 1): [2],
+            (2, 1, 1): [1, 2],
+            (3, 2, 0): [0],
+            (4, 0, 0): [0],
+            # dropped because (,3) is not included in the order.
+            # (5, 3): [1],
+        }
+
+    def test_rearranged_multiaxis_None(self):
+        idx = iindex(
+            {
+                (1, 1, 0): [2],
+                (2, 0, 0): [1, 2],
+                (3, 1, 1): [0],
+                (4, 2, 1): [0],
+                (5, 3, 1): [1],
+            },
+            common=0,
+            shape=(10, 4, 2),
+        )
+
+        assert idx.rearranged(None, [1, 0]).to_dict() == {
+            (1, 1, 1): [2],
+            (2, 0, 1): [1, 2],
+            (3, 1, 0): [0],
+            (4, 2, 0): [0],
+            (5, 3, 0): [1],
+        }
+
     def test_rearranged_drop_axis(self):
         idx = iindex({(99, 0): [1, 3, 4], (88, 1): [1, 2, 4]}, common=0, shape=(5, 2),)
 
