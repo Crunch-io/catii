@@ -175,7 +175,7 @@ def set_union_merge_np(const uint32[:] left_array, const uint32[:] right_array):
     return result[:result_len]
 
 
-def union(left_array, right_array):
+def union(left_array, right_array, copy_left=False, copy_right=False):
     """Return the set union of the given ordered arrays, or None.
 
     If both values are None, or the result is zero length, None is returned.
@@ -184,10 +184,10 @@ def union(left_array, right_array):
         if right_array is None:
             return None
         else:
-            result = right_array
+            result = right_array.copy() if copy_right else right_array
     else:
         if right_array is None:
-            result = left_array
+            result = left_array.copy() if copy_left else left_array
         else:
             result = set_union_merge_np(left_array, right_array)
 
@@ -326,7 +326,7 @@ def set_difference_merge_np(const uint32[:] left_array, const uint32[:] right_ar
     return result[:result_len]
 
 
-def difference(left_array, right_array):
+def difference(left_array, right_array, copy=False):
     """Return the set difference (left - right) of the given ordered arrays, or None.
 
     If the left array is None, or the result is zero length, None is returned.
@@ -334,7 +334,7 @@ def difference(left_array, right_array):
     if left_array is None:
         return None
     if right_array is None:
-        result = left_array
+        result = left_array.copy() if copy else left_array
     else:
         result = set_difference_merge_np(left_array, right_array)
     if len(result):

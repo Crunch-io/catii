@@ -859,20 +859,15 @@ class iindex(dict):
         # Each new value is replacing an old value at a particular rowid.
         # Do this in two passes, where we first *remove* the old association
         # by deleting the target rowids from self...
+        # TODO: benchmark doing this with set difference of each key with
+        # all rows for same axes; would probably save memory but explode time.
         other_cell_mask = numpy.zeros(self.shape, dtype=bool)
-        if len(self.shape) > 1:
-            for coords, new_rowids in entries.items():
-                other_cell_mask[new_rowids, coords[1]] = True
-        else:
-            for new_rowids in entries.values():
-                other_cell_mask[new_rowids] = True
+        for coords, new_rowids in entries.items():
+            other_cell_mask[(new_rowids,) + coords[1:]] = True
 
         to_delete = []
         for coords, rowids in self.items():
-            if len(self.shape) > 1:
-                matches = other_cell_mask[rowids, coords[1]]
-            else:
-                matches = other_cell_mask[rowids]
+            matches = other_cell_mask[(rowids,) + coords[1:]]
             if numpy.any(matches):
                 if numpy.all(matches):
                     to_delete.append(coords)
@@ -882,21 +877,7 @@ class iindex(dict):
             del self[coords]
 
         # ...and then insert new rowids.
-        for coords, new_rowids in entries.items():
-            if coords[0] == self.common:
-                continue
-
-            old_rowids = self.get(coords)
-            if old_rowids is None:
-                rowids = new_rowids
-            else:
-                rowids = numpy.concatenate((old_rowids, new_rowids))
-
-            # This copies, uniquifies, and sorts.
-            # Make sure all three conditions hold if ever changed.
-            self[coords] = numpy.unique(rowids)
-
-        return False
+        self.union_update({k: v for k, v in entries.items() if k[0] != self.common})
 
     def union_update(self, other):
         """Update self, adding elements from other.
@@ -907,7 +888,8 @@ class iindex(dict):
         """
         for coords, rowids in other.items():
             rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
-            self.set_if(coords, union(self.get(coords), rowids))
+            # Make a copy of other[coords] if coords not in self.
+            self.set_if(coords, union(self.get(coords), rowids, copy_right=True))
 
     def intersection_update(self, other):
         """Update self, keeping only elements found in it and other.
@@ -933,4 +915,5 @@ class iindex(dict):
         """
         for coords, rowids in other.items():
             rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
-            self.set_if(coords, difference(self.get(coords), rowids))
+            # There's no need to copy self[coords] when updating self.
+            self.set_if(coords, difference(self.get(coords), rowids, copy=False))
