@@ -194,26 +194,7 @@ class TestReindexed:
         assert reindexed.to_dict() == {("0",): [0, 7, 8, 9]}
 
 
-class TestRearrangeColumns:
-    def test_rearrange(self):
-        idx = iindex(
-            {(1, 1): [2], (2, 0): [1, 2], (3, 1): [0], (4, 2): [0], (5, 2): [1]},
-            common="0",
-            shape=(10,),
-        )
-
-        idx.rearrange_columns([2, 0, 1])
-
-        assert idx.to_dict() == {
-            (1, 2): [2],
-            (2, 1): [1, 2],
-            (3, 2): [0],
-            (4, 0): [0],
-            (5, 0): [1],
-        }
-
-
-class TestSubsetting:
+class TestTransformMethods:
     def test_filter(self):
         idx = iindex({("99",): [1, 3, 5], ("88",): [2, 4, 6]}, common="0", shape=(10,))
         filtered = idx.filter(
@@ -234,28 +215,49 @@ class TestSubsetting:
             shape=(5,),
         )
 
-    def test_copy_subset(self):
+    def test_rearranged(self):
+        idx = iindex(
+            {
+                ("1", 1): [2],
+                ("2", 0): [1, 2],
+                ("3", 1): [0],
+                ("4", 2): [0],
+                ("5", 3): [1],
+            },
+            common="0",
+            shape=(10, 4),
+        )
+
+        assert idx.rearranged([2, 0, 1]).to_dict() == {
+            ("1", 2): [2],
+            ("2", 1): [1, 2],
+            ("3", 2): [0],
+            ("4", 0): [0],
+            # dropped because (,3) is not included in the order.
+            # (5, 3): [1],
+        }
+
         idx = iindex(
             {("99", 0): [1, 3, 4], ("88", 1): [1, 2, 4]}, common="0", shape=(5, 2),
         )
 
         # col 3 doesn't exist, so will be correctly ignored.
-        assert idx.copy_subset([0, 3]).to_dict() == {("99", 0): [1, 3, 4]}
+        assert idx.rearranged([0, 3]).to_dict() == {("99", 0): [1, 3, 4]}
 
-    def test_copy_subset_axis(self):
+    def test_rearranged_drop_axis(self):
         idx = iindex(
             {("99", 0): [1, 3, 4], ("88", 1): [1, 2, 4]}, common="0", shape=(5, 2),
         )
 
         # only retain column 1. By passing 1 instead of [1], we are instructing
-        # copy_subset to drop the 2nd axis altogether.
-        assert idx.copy_subset(1).to_dict() == {("88",): [1, 2, 4]}
+        # rearranged to drop the 2nd axis altogether.
+        assert idx.rearranged(1).to_dict() == {("88",): [1, 2, 4]}
 
-    def test_copy_subset_1d(self):
+    def test_rearranged_axes_mismatch(self):
         idx = iindex({("99",): [1, 3, 5], ("88",): [2, 4, 6]}, common="0", shape=(10,))
 
         with pytest.raises(TypeError):
-            idx.copy_subset([0, 3])
+            idx.rearranged([0, 3])
 
 
 class TestToFromArray:

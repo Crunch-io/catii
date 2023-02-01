@@ -201,10 +201,31 @@ class iindex(dict):
                                 % (coords, other_coords, list(sorted(intersection)))
                             )
 
+    # -------------------------- iindex properties -------------------------- #
+
     @property
-    def ndim(self):
-        """Return the number of dimensions in self.shape."""
-        return len(self.shape)
+    def abscissae(self):
+        """The set of distinct values for the first coordinate."""
+        seen = {coords[0] for coords in self}
+        if self.size > sum(len(v) for v in self.values()):
+            seen.add(self.common)
+        return seen
+
+    @property
+    def size(self):
+        """Number of items in the iindex (including common values)."""
+        # This is 13x faster than numpy.prod
+        return reduce(operator.mul, self.shape, 1)
+
+    @property
+    def sparsity(self):
+        """The percentage of items in the iindex which are common."""
+        numcells = self.size
+        if numcells:
+            n_common = numcells - sum(len(v) for v in self.values())
+            return (100.0 * n_common) / numcells
+        else:
+            return 0
 
     @property
     def nbytes(self):
@@ -214,6 +235,13 @@ class iindex(dict):
         s += sys.getsizeof(self.common)
         s += sys.getsizeof(self.shape)
         return s
+
+    @property
+    def ndim(self):
+        """The number of iindex dimensions."""
+        return len(self.shape)
+
+    # -------------------------- iindex conversion -------------------------- #
 
     def to_array(self, mapping=None, dtype=None):
         """Return a NumPy array of values from self.
@@ -402,28 +430,7 @@ class iindex(dict):
         """
         return {coords: rowids.tolist() for coords, rowids in self.items(force)}
 
-    @property
-    def abscissae(self):
-        """Return the set of all found values for the first coordinate."""
-        seen = {coords[0] for coords in self}
-        if self.size > sum(len(v) for v in self.values()):
-            seen.add(self.common)
-        return seen
-
-    @property
-    def size(self):
-        # This is 13x faster than numpy.prod
-        return reduce(operator.mul, self.shape, 1)
-
-    @property
-    def sparsity(self):
-        """Return the percentage of cells in self which are common."""
-        numcells = self.size
-        if numcells:
-            n_common = numcells - sum(len(v) for v in self.values())
-            return (100.0 * n_common) / numcells
-        else:
-            return 0
+    # ------------------- entry selection and manipulation ------------------- #
 
     def shift_common(self, new_common=None):
         """Change the most common value in self as needed.
@@ -501,43 +508,6 @@ class iindex(dict):
             value = numpy.asarray(value)
             self[key] = value.copy() if copy else value
 
-    def union_update(self, other):
-        """Update self, adding elements from other.
-
-        If `other` is an iindex, its common value is not unioned--only its
-        explicit entries. You may need to shift_common() on self or other
-        before updating.
-        """
-        for coords, rowids in other.items():
-            rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
-            self.set_if(coords, union(self.get(coords), rowids))
-
-    def intersection_update(self, other):
-        """Update self, keeping only elements found in it and other.
-
-        If `other` is an iindex, its common value is not intersected--only its
-        explicit entries. You may need to shift_common() on self or other
-        before updating.
-        """
-        for coords in list(self.keys()):
-            if coords not in other:
-                del self[coords]
-
-        for coords, rowids in other.items():
-            rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
-            self.set_if(coords, intersection(self.get(coords), rowids))
-
-    def difference_update(self, other):
-        """Update self, removing elements found in others.
-
-        If `other` is an iindex, its common value is not differenced--only its
-        explicit entries. You may need to shift_common() on self or other
-        before updating.
-        """
-        for coords, rowids in other.items():
-            rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
-            self.set_if(coords, difference(self.get(coords), rowids))
-
     def items(self, force=False):
         """Return (coords, rowids) pairs from self, plus (common, rowids) if force."""
         if force:
@@ -554,6 +524,186 @@ class iindex(dict):
             return chain(self.items(), commons)
         else:
             return super().items()
+
+    # -------------------------- transformed copies -------------------------- #
+
+    def collapsed(self, precedence, mapping=None):
+        """Return a new iindex, collapsing axis 1 in precedence order.
+
+         ____M____
+         A   B   C     M.collapsed([1, 0, -1])
+        --  --  --     -----------------------
+        -1   0  -1                           0
+         1   0  -1                           1
+         0   0   0                           0
+         0   1  -1                           1
+        -1  -1  -1                          -1
+
+        The returned index will be of the same row length, but without columns.
+        Each output row will contain the first value from the given "precedence"
+        argument which is present in at least one column. That is, given
+        precedence [1, 0, -1], a row will obtain a 1 if any of the input
+        index's columns contains a 1; if none do, the row will obtain
+        a 0 if any of the columns contains a 0; if none do, the row
+        will obtain a -1.
+
+        Not all existing values need to be included in the "precedence" argument;
+        any rows which only contain unmentioned ids will obtain the last value
+        in the given precedence.
+        """
+        if len(self.shape) < 2:
+            raise TypeError(
+                "Cannot collapse: no column axis present "
+                "in shape %s." % repr(self.shape)
+            )
+
+        if mapping is None:
+            new_common = self.common
+        else:
+            new_common = mapping.get(self.common, self.common)
+
+        numrows, numcols = self.shape[:2]
+        if not numrows:
+            return self.__class__({}, new_common, (0,))
+
+        # Gather all rowids for each (possibly mapped) initial coordinate.
+        gathered = {}
+        for coords, rowids in self.items():
+            new_coord = coords[0]
+            if mapping is not None:
+                new_coord = mapping.get(new_coord, new_coord)
+
+            if new_coord != new_common:
+                v = gathered.get(new_coord)
+                if v is not None:
+                    v.append(rowids)
+                else:
+                    gathered[new_coord] = [rowids]
+
+        # Iterate through the gathered rowids in reverse precedence order,
+        # overwriting the output as we go.
+        # This takes some RAM but only O(rows), not subvars etc.
+        dtype = fit_dtype(max(precedence))
+        default = precedence[-1]
+        output = numpy.full(numrows, default, dtype=dtype)
+        common_has_been_written = True
+        if default != new_common:
+            # We filled the output with the lowest-precedence coord.
+            # If that's NOT the common value, then we need to keep track
+            # of which rows have explicitly obtained an uncommon value.
+            common_has_been_written = False
+            common_count = numpy.full(numrows, numcols, dtype=fit_dtype(numcols))
+            for rowids in gathered.get(default, []):
+                common_count[rowids] -= 1
+        for coord in reversed(precedence[:-1]):
+            if coord == new_common:
+                # Rows which already have ALL values at a lower precedence
+                # stay that way; any others get the common value for now,
+                # (but may be overwritten with higher precedence later).
+                output[common_count != 0] = coord
+                common_has_been_written = True
+            else:
+                for rowids in gathered.get(coord, []):
+                    output[rowids] = coord
+                    if not common_has_been_written:
+                        # This simple flag can save a lot of runtime, only
+                        # counting values "to the right of" the common value.
+                        common_count[rowids] -= 1
+
+        # from_array will determine the new best common value for us.
+        return self.__class__.from_array(output)
+
+    def copy(self):
+        """Return a copy of self."""
+        return iindex(
+            dict((coords, rowids.copy()) for coords, rowids in self.items()),
+            self.common,
+            self.shape,
+        )
+
+    def filter(self, mask, new_length):
+        """Return self masked by the given boolean array mask.
+
+        Index  Dense       Map         Mask    Index  Dense        Map
+          0      7     7: [0, 2, 4]     T        0      7      7: [0, 3]
+          1      8     8: [1, 3, 5]     T        1      8      8: [1, 2]
+          2      7                  --- F --->   ?
+          3      8                      T        2      8
+          4      7                      T        3      7
+          5      8                      F        ?
+        """
+        new_rowids = numpy.empty(len(mask), dtype=self.rowid_dtype)
+        new_rowids[mask] = numpy.arange(new_length, dtype=self.rowid_dtype)
+
+        new_entries = {}
+        for coords, rowids in self.items():
+            m = mask[rowids]
+            if numpy.any(m):
+                filtered_rowids = rowids[m]
+                new_entries[coords] = new_rowids[filtered_rowids]
+
+        new_shape = (new_length,) + self.shape[1:]
+        new_index = self.__class__(new_entries, self.common, new_shape)
+        new_index.shift_common()
+
+        return new_index
+
+    def rearranged(self, *orders):
+        """Return a copy of self, with data for the given orders only.
+
+        Each argument addresses a higher dimension. That is, if one argument
+        is passed, the second axis is rearranged; if two are passed, then
+        the second and third dimensions are rearranged. Pass `None` to skip
+        an axis without rearranging it.
+
+        Each argument may be an integer, a list of integers, or None.
+        If a list, then those slices are included in the output in that order.
+        If a single integer, only that slice is included, and that axis is
+        collapsed in the output. If None, that axis is included unchanged.
+        """
+        if len(orders) > self.ndim - 1:
+            raise TypeError(
+                "Cannot rearrange %d axes with shape %r." % (len(orders), self.shape)
+            )
+
+        new_shape = [self.shape[0]]
+        for i, order in enumerate(orders, 1):
+            if order is None:
+                new_shape.append(self.shape[i])
+            elif isinstance(order, int):
+                pass
+            else:
+                new_shape.append(len(order))
+        new_shape = tuple(new_shape)
+
+        new_entries = {}
+        for coords, rowids in self.items():
+            keep = True
+            new_coords = [coords[0]]
+            for axis, order in enumerate(orders, 1):
+                coord = coords[axis]
+                if order is None:
+                    # Keep all slices for this axis.
+                    new_coords.append(coord)
+                elif isinstance(order, int):
+                    if coord == order:
+                        # Keep this single slice for this axis
+                        # (but drop the axis).
+                        pass
+                    else:
+                        keep = False
+                        break
+                else:
+                    if coord in order:
+                        new_coords.append(order.index(coord))
+                    else:
+                        keep = False
+                        break
+
+            if keep:
+                new_entries[tuple(new_coords)] = rowids
+
+        return iindex(new_entries, self.common, new_shape)
 
     def reindexed(self, mapping, copy=True, shift=True, assume_unique=False):
         """Return a new iindex, whose entries contain mapped values.
@@ -619,90 +769,6 @@ class iindex(dict):
 
         return new_index
 
-    def rearrange_columns(self, order):
-        """Rearrange the columns in self to the given order.
-
-        Any coordinates which are not in the given order are dropped from self.
-        """
-        new_entries = dict(
-            ((coords[0], order.index(coords[1])), rowids)
-            for coords, rowids in self.items()
-            if coords[1] in order
-        )
-        self.clear()
-        self.update(new_entries)
-        self.shape = (self.shape[0], len(order))
-
-    def filter(self, mask, new_length):
-        """Return self masked by the given boolean array mask.
-
-        Index  Dense       Map         Mask    Index  Dense        Map
-          0      7     7: [0, 2, 4]     T        0      7      7: [0, 3]
-          1      8     8: [1, 3, 5]     T        1      8      8: [1, 2]
-          2      7                  --- F --->   ?
-          3      8                      T        2      8
-          4      7                      T        3      7
-          5      8                      F        ?
-        """
-        new_rowids = numpy.empty(len(mask), dtype=self.rowid_dtype)
-        new_rowids[mask] = numpy.arange(new_length, dtype=self.rowid_dtype)
-
-        new_entries = {}
-        for coords, rowids in self.items():
-            m = mask[rowids]
-            if numpy.any(m):
-                filtered_rowids = rowids[m]
-                new_entries[coords] = new_rowids[filtered_rowids]
-
-        new_shape = (new_length,) + self.shape[1:]
-        new_index = self.__class__(new_entries, self.common, new_shape)
-        new_index.shift_common()
-
-        return new_index
-
-    def copy(self):
-        """Return a copy of self."""
-        return iindex(
-            dict((coords, rowids.copy()) for coords, rowids in self.items()),
-            self.common,
-            self.shape,
-        )
-
-    def copy_subset(self, column_coordinates):
-        """Return a copy of self, with data for the given columns only.
-
-        If `column_coordinates` is a list of coordinate values, the returned
-        instance will retain a second axis in its shape, equal to the number
-        of provided values. If `column_coordinates` is a single coordinate
-        value, the output will drop the second axis.
-        """
-        if len(self.shape) < 2:
-            raise TypeError(
-                "Cannot copy a subset of columns: no column axis present "
-                "in shape %s." % repr(self.shape)
-            )
-
-        if isinstance(column_coordinates, int):
-            entries = {}
-            for coords, rowids in self.items():
-                if coords[1] == column_coordinates:
-                    entries[(coords[0],) + coords[2:]] = rowids
-            return iindex(entries, self.common, (self.shape[0],) + self.shape[2:])
-        else:
-            entries = {}
-            for coords, rowids in self.items():
-                try:
-                    new_col = column_coordinates.index(coords[1])
-                except ValueError:
-                    pass
-                else:
-                    entries[(coords[0], new_col) + coords[2:]] = rowids
-            return iindex(
-                entries,
-                self.common,
-                (self.shape[0], len(column_coordinates)) + self.shape[2:],
-            )
-
     def slices1d(self):
         """Yield 1-D slices of self, iterating from the last coordinate first.
 
@@ -721,6 +787,8 @@ class iindex(dict):
                     yield s
         else:
             yield self
+
+    # -------------------------- combining iindexes -------------------------- #
 
     def append(self, other):
         """Vertically stack the given `other` index as new rows below self.
@@ -830,88 +898,39 @@ class iindex(dict):
 
         return False
 
-    def collapsed(self, precedence, mapping=None):
-        """Return a new iindex, collapsing axis 1 in precedence order.
+    def union_update(self, other):
+        """Update self, adding elements from other.
 
-         ____M____
-         A   B   C     M.collapsed([1, 0, -1])
-        --  --  --     -----------------------
-        -1   0  -1                           0
-         1   0  -1                           1
-         0   0   0                           0
-         0   1  -1                           1
-        -1  -1  -1                          -1
-
-        The returned index will be of the same row length, but without columns.
-        Each output row will contain the first value from the given "precedence"
-        argument which is present in at least one column. That is, given
-        precedence [1, 0, -1], a row will obtain a 1 if any of the input
-        index's columns contains a 1; if none do, the row will obtain
-        a 0 if any of the columns contains a 0; if none do, the row
-        will obtain a -1.
-
-        Not all existing values need to be included in the "precedence" argument;
-        any rows which only contain unmentioned ids will obtain the last value
-        in the given precedence.
+        If `other` is an iindex, its common value is not unioned--only its
+        explicit entries. You may need to shift_common() on self or other
+        before updating.
         """
-        if len(self.shape) < 2:
-            raise TypeError(
-                "Cannot collapse: no column axis present "
-                "in shape %s." % repr(self.shape)
-            )
+        for coords, rowids in other.items():
+            rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
+            self.set_if(coords, union(self.get(coords), rowids))
 
-        if mapping is None:
-            new_common = self.common
-        else:
-            new_common = mapping.get(self.common, self.common)
+    def intersection_update(self, other):
+        """Update self, keeping only elements found in it and other.
 
-        numrows, numcols = self.shape[:2]
-        if not numrows:
-            return self.__class__({}, new_common, (0,))
+        If `other` is an iindex, its common value is not intersected--only its
+        explicit entries. You may need to shift_common() on self or other
+        before updating.
+        """
+        for coords in list(self.keys()):
+            if coords not in other:
+                del self[coords]
 
-        # Gather all rowids for each (possibly mapped) initial coordinate.
-        gathered = {}
-        for coords, rowids in self.items():
-            new_coord = coords[0]
-            if mapping is not None:
-                new_coord = mapping.get(new_coord, new_coord)
+        for coords, rowids in other.items():
+            rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
+            self.set_if(coords, intersection(self.get(coords), rowids))
 
-            if new_coord != new_common:
-                v = gathered.get(new_coord)
-                if v is not None:
-                    v.append(rowids)
-                else:
-                    gathered[new_coord] = [rowids]
+    def difference_update(self, other):
+        """Update self, removing elements found in others.
 
-        # Iterate through the gathered rowids in reverse precedence order,
-        # overwriting the output as we go.
-        # This takes some RAM but only O(rows), not subvars etc.
-        dtype = fit_dtype(max(precedence))
-        default = precedence[-1]
-        output = numpy.full(numrows, default, dtype=dtype)
-        common_has_been_written = True
-        if default != new_common:
-            # We filled the output with the lowest-precedence coord.
-            # If that's NOT the common value, then we need to keep track
-            # of which rows have explicitly obtained an uncommon value.
-            common_has_been_written = False
-            common_count = numpy.full(numrows, numcols, dtype=fit_dtype(numcols))
-            for rowids in gathered.get(default, []):
-                common_count[rowids] -= 1
-        for coord in reversed(precedence[:-1]):
-            if coord == new_common:
-                # Rows which already have ALL values at a lower precedence
-                # stay that way; any others get the common value for now,
-                # (but may be overwritten with higher precedence later).
-                output[common_count != 0] = coord
-                common_has_been_written = True
-            else:
-                for rowids in gathered.get(coord, []):
-                    output[rowids] = coord
-                    if not common_has_been_written:
-                        # This simple flag can save a lot of runtime, only
-                        # counting values "to the right of" the common value.
-                        common_count[rowids] -= 1
-
-        # from_array will determine the new best common value for us.
-        return self.__class__.from_array(output)
+        If `other` is an iindex, its common value is not differenced--only its
+        explicit entries. You may need to shift_common() on self or other
+        before updating.
+        """
+        for coords, rowids in other.items():
+            rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
+            self.set_if(coords, difference(self.get(coords), rowids))
