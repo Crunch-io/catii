@@ -621,8 +621,8 @@ class iindex(dict):
             self.shape,
         )
 
-    def filter(self, mask, new_length):
-        """Return self masked by the given boolean array mask.
+    def filtered(self, mask, new_length):
+        """Return a copy of self, masked by the given boolean array row mask.
 
         Index  Dense       Map         Mask    Index  Dense        Map
           0      7     7: [0, 2, 4]     T        0      7      7: [0, 3]

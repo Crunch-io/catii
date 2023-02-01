@@ -195,16 +195,15 @@ class TestReindexed:
 
 
 class TestTransformMethods:
-    def test_filter(self):
+    def test_filtered(self):
         idx = iindex({("99",): [1, 3, 5], ("88",): [2, 4, 6]}, common="0", shape=(10,))
-        filtered = idx.filter(
-            numpy.array([True if v % 2 == 0 else False for v in range(10)]), 5
-        )
 
         # We filtered out the odd rows, selecting 88 from rows 2, 4, 6
         # and 0 from rows 0 and 8.
         # The rectangular result would be [0, 88, 88, 88, 0].
-        assert filtered == iindex(
+        assert idx.filtered(
+            numpy.array([True if v % 2 == 0 else False for v in range(10)]), 5
+        ) == iindex(
             # The indexed result SHOULD NOT include 99 because it has
             # no more rowids, but it SHOULD shift the common value to 88
             # because it is now the most numerous.
