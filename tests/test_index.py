@@ -306,14 +306,14 @@ class TestTransformMethods:
             shape=(5,),
         )
 
-    def test_rearranged(self):
+    def test_sliced(self):
         idx = iindex(
             {(1, 1): [2], (2, 0): [1, 2], (3, 1): [0], (4, 2): [0], (5, 3): [1]},
             common=0,
             shape=(10, 4),
         )
 
-        assert idx.rearranged([2, 0, 1]).to_dict() == {
+        assert idx.sliced([2, 0, 1]).to_dict() == {
             (1, 2): [2],
             (2, 1): [1, 2],
             (3, 2): [0],
@@ -325,9 +325,9 @@ class TestTransformMethods:
         idx = iindex({(99, 0): [1, 3, 4], (88, 1): [1, 2, 4]}, common=0, shape=(5, 2),)
 
         # col 3 doesn't exist, so will be correctly ignored.
-        assert idx.rearranged([0, 3]).to_dict() == {(99, 0): [1, 3, 4]}
+        assert idx.sliced([0, 3]).to_dict() == {(99, 0): [1, 3, 4]}
 
-    def test_rearranged_multiaxis(self):
+    def test_sliced_multiaxis(self):
         idx = iindex(
             {
                 (1, 1, 0): [2],
@@ -340,7 +340,7 @@ class TestTransformMethods:
             shape=(10, 4, 2),
         )
 
-        assert idx.rearranged([2, 0, 1], [1, 0]).to_dict() == {
+        assert idx.sliced([2, 0, 1], [1, 0]).to_dict() == {
             (1, 2, 1): [2],
             (2, 1, 1): [1, 2],
             (3, 2, 0): [0],
@@ -349,7 +349,7 @@ class TestTransformMethods:
             # (5, 3): [1],
         }
 
-    def test_rearranged_multiaxis_None(self):
+    def test_sliced_multiaxis_None(self):
         idx = iindex(
             {
                 (1, 1, 0): [2],
@@ -362,7 +362,7 @@ class TestTransformMethods:
             shape=(10, 4, 2),
         )
 
-        assert idx.rearranged(None, [1, 0]).to_dict() == {
+        assert idx.sliced(None, [1, 0]).to_dict() == {
             (1, 1, 1): [2],
             (2, 0, 1): [1, 2],
             (3, 1, 0): [0],
@@ -370,18 +370,18 @@ class TestTransformMethods:
             (5, 3, 0): [1],
         }
 
-    def test_rearranged_drop_axis(self):
+    def test_sliced_drop_axis(self):
         idx = iindex({(99, 0): [1, 3, 4], (88, 1): [1, 2, 4]}, common=0, shape=(5, 2),)
 
         # only retain column 1. By passing 1 instead of [1], we are instructing
-        # rearranged to drop the 2nd axis altogether.
-        assert idx.rearranged(1).to_dict() == {(88,): [1, 2, 4]}
+        # sliced to drop the 2nd axis altogether.
+        assert idx.sliced(1).to_dict() == {(88,): [1, 2, 4]}
 
-    def test_rearranged_axes_mismatch(self):
+    def test_sliced_axes_mismatch(self):
         idx = iindex({(99,): [1, 3, 5], (88,): [2, 4, 6]}, common=0, shape=(10,))
 
         with pytest_raises(TypeError):
-            idx.rearranged([0, 3])
+            idx.sliced([0, 3])
 
     def test_slices1d(self):
         # 1-D

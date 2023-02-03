@@ -648,13 +648,13 @@ class iindex(dict):
 
         return new_index
 
-    def rearranged(self, *orders):
+    def sliced(self, *orders):
         """Return a copy of self, with data for the given orders only.
 
         Each argument addresses a higher dimension. That is, if one argument
-        is passed, the second axis is rearranged; if two are passed, then
-        the second and third dimensions are rearranged. Pass `None` to skip
-        an axis without rearranging it.
+        is passed, the second axis is sliced; if two are passed, then
+        the second and third dimensions are sliced. Pass `None` to skip
+        an axis without slicing it.
 
         Each argument may be an integer, a list of integers, or None.
         If a list, then those slices are included in the output in that order.
@@ -663,7 +663,7 @@ class iindex(dict):
         """
         if len(orders) > self.ndim - 1:
             raise TypeError(
-                "Cannot rearrange %d axes with shape %r." % (len(orders), self.shape)
+                "Cannot slice %d axes with shape %r." % (len(orders), self.shape)
             )
 
         new_shape = [self.shape[0]]
