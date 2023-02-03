@@ -386,17 +386,17 @@ class TestTransformMethods:
     def test_slices1d(self):
         # 1-D
         idx = iindex({(1,): [1, 3, 5], (2,): [2, 4, 6]}, common=0, shape=(10,))
-        assert [ii.to_dict() for ii in idx.slices1d()] == [
-            {(1,): [1, 3, 5], (2,): [2, 4, 6]}
+        assert [(coords, ii.to_dict()) for coords, ii in idx.slices1d()] == [
+            ((), {(1,): [1, 3, 5], (2,): [2, 4, 6]})
         ]
 
         # 2-D
         idx = iindex(
             {(1, 0): [1, 3], (2, 0): [4, 6], (1, 1): [5]}, common=0, shape=(10, 2)
         )
-        assert [ii.to_dict() for ii in idx.slices1d()] == [
-            {(1,): [1, 3], (2,): [4, 6]},
-            {(1,): [5]},
+        assert [(coords, ii.to_dict()) for coords, ii in idx.slices1d()] == [
+            ((0,), {(1,): [1, 3], (2,): [4, 6]}),
+            ((1,), {(1,): [5]}),
         ]
 
         # 3-D
@@ -405,19 +405,19 @@ class TestTransformMethods:
             common=0,
             shape=(10, 2, 2),
         )
-        assert [ii.to_dict() for ii in idx.slices1d()] == [
-            {(1,): [1, 3], (2,): [4, 6]},
+        assert [(coords, ii.to_dict()) for coords, ii in idx.slices1d()] == [
+            ((0, 0), {(1,): [1, 3], (2,): [4, 6]}),
             # Important empty slice to allow aggregations to count 0.
-            {},
-            {(1,): [5]},
-            {},
+            ((1, 0), {}),
+            ((0, 1), {(1,): [5]}),
+            ((1, 1), {}),
         ]
 
         # 0-D
         idx = iindex({}, common=0, shape=())
-        assert [ii.to_dict() for ii in idx.slices1d()] == [
+        assert [(coords, ii.to_dict()) for coords, ii in idx.slices1d()] == [
             # Important empty slice to allow aggregations to count 0.
-            {}
+            ((), {})
         ]
 
 

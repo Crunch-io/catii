@@ -769,10 +769,14 @@ class iindex(dict):
 
         return new_index
 
-    def slices1d(self):
-        """Yield 1-D slices of self, iterating from the last coordinate first.
+    def slices1d(self, base_coords=()):
+        """Yield (coords, 1-D slice) pairs of self.
 
-        This is useful for aggregations (like counting) over the dependent axis.
+        This is useful for aggregations (like counting) over higher dimensions.
+        Slices are iterated over in REVERSE axis order--that is, the last
+        coordinate is the outermost loop--on the theory that increasing axes
+        describe increasingly higher dimensions (arrays of arrays).
+        The returned coordinate tuples are in the original order.
         """
         if len(self.shape) > 1:
             # Slice...
@@ -782,11 +786,13 @@ class iindex(dict):
 
             # ...and recurse
             subshape = self.shape[:-1]
-            for subentries in buckets:
-                for s in iindex(subentries, self.common, subshape).slices1d():
+            for coord, subentries in enumerate(buckets):
+                for s in iindex(subentries, self.common, subshape).slices1d(
+                    (coord,) + base_coords
+                ):
                     yield s
         else:
-            yield self
+            yield base_coords, self
 
     # -------------------------- combining iindexes -------------------------- #
 
