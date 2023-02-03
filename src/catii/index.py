@@ -770,13 +770,22 @@ class iindex(dict):
         return new_index
 
     def slices1d(self, base_coords=()):
-        """Yield (coords, 1-D slice) pairs of self.
+        """Yield recursive (coords, 1-D slice) pairs of self.
 
         This is useful for aggregations (like counting) over higher dimensions.
         Slices are iterated over in REVERSE axis order--that is, the last
         coordinate is the outermost loop--on the theory that increasing axes
         describe increasingly higher dimensions (arrays of arrays).
         The returned coordinate tuples are in the original order.
+
+        For example, an iindex with shape (1000, 2, 3) would yield 1-D slices
+        in this order:
+            (0, 0): idx.slice([0], [0]),
+            (1, 0): idx.slice([1], [0]),
+            (2, 0): idx.slice([2], [0]),
+            (0, 1): idx.slice([0], [1]),
+            (1, 1): idx.slice([1], [1]),
+            (2, 1): idx.slice([2], [1]),
         """
         if len(self.shape) > 1:
             # Slice...
