@@ -1,12 +1,9 @@
 import os
 
-import Cython
-import Cython.Compiler.Options
 import numpy
 from setuptools import Extension, find_packages, setup
 
 numpy_include = numpy.get_include()
-Cython.Compiler.Options.annotate = True
 
 ext_modules = [
     Extension(
@@ -18,7 +15,11 @@ ext_modules = [
 
 # For stick-in-the-mud devs:
 if os.environ.get("CYTHONIZE_SETUP_PY", False):
+    import Cython
+    import Cython.Compiler.Options
     from Cython.Build import cythonize
+
+    Cython.Compiler.Options.annotate = True
 
     ext_modules = cythonize(ext_modules)
 
