@@ -4,25 +4,21 @@ import numpy
 class ffunc:
     """A base class for frequency (and other aggregate) functions."""
 
-    def __init__(self, weights=None):
-        self.weights = weights
-
     def get_initial_regions(self, cube):
         """Return NumPy arrays to fill, empty except for corner values."""
         raise NotImplementedError
 
     def fill(self, cube, regions):
-        """Fill the `regions` arrays with distributions contingent on cube.
+        """Fill the `regions` arrays with distributions contingent on cube.dims.
 
-        The given `regions` must have already been initialized (including
-        any corner values). Common cells are not computed here; instead,
-        marginal cells are computed, and common cells are inferred from
-        them in self.reduce.
+        The given `regions` are assumed to be part of a (possibly larger) cube,
+        one which has already been initialized (including any corner values).
+        We will compute its common cells from the margins later in self.reduce.
         """
         raise NotImplementedError
 
     def reduce(self, cube, regions):
-        """Calculate common cells for the given regions, and return them without margins."""
+        """Return `regions` with common cells calculated and margins removed."""
         raise NotImplementedError
 
     def calculate(self, cube):
@@ -33,10 +29,31 @@ class ffunc:
 
 
 class ffunc_count(ffunc):
+    """A `count` frequency function.
+
+    If `weights` are given and not None, it must be a NumPy array of numeric
+    weight values, which correspond row-wise to any cube.dims.
+
+    """
+
+    def __init__(self, weights=None, N=None):
+        self.weights = weights
+        self.N = N
+
     def get_initial_regions(self, cube):
+        """Return NumPy arrays to fill, empty except for corner values."""
         if self.weights is None:
             dtype = int
-            corner_value = cube.dims[0].shape[0]
+            if self.N is not None:
+                corner_value = self.N
+            elif cube.dims:
+                corner_value = cube.dims[0].shape[0]
+            elif self.weights is not None:
+                corner_value = self.weights.shape[0]
+            else:
+                raise ValueError(
+                    "Cannot determine counts with no N, dimensions, or weights."
+                )
         else:
             dtype = float
             corner_value = self.weights.sum()
@@ -52,7 +69,7 @@ class ffunc_count(ffunc):
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
         one which has already been initialized (including any corner values).
-        We will compute its common cells from the margins later.
+        We will compute its common cells from the margins later in self.reduce.
         """
         (counts,) = regions
         if self.weights is None:
@@ -68,6 +85,7 @@ class ffunc_count(ffunc):
         cube.walk(_fill)
 
     def reduce(self, cube, regions):
+        """Return `regions` with common cells calculated and margins removed."""
         # Calculate common slices by subtracting uncommon results from margins.
         (counts,) = regions
         cube._compute_common_cells_from_marginal_diffs(counts)
@@ -79,7 +97,11 @@ class ffunc_count(ffunc):
         # (within the machine's floating-point epsilon). For most values, this
         # has little effect, but when the value should be 0 but is just barely
         # not 0, it's easy to end up with e.g. 1e-09/1e-09=1 instead of 0/0=nan.
-        output[numpy.isclose(output, 0)] = 0
+        if output.shape:
+            output[numpy.isclose(output, 0)] = 0
+        else:
+            if numpy.isclose(output, 0):
+                output = output.dtype(0)
 
         return (output,)
 
@@ -95,6 +117,7 @@ class ffunc_sum(ffunc):
             self.countables[weights == 0] = False
 
     def get_initial_regions(self, cube):
+        """Return NumPy arrays to fill, empty except for corner values."""
         dtype = int if self.weights is None else float
 
         sums = numpy.zeros(cube.working_shape, dtype=self.summables.dtype)
@@ -110,8 +133,8 @@ class ffunc_sum(ffunc):
         """Fill the `regions` arrays with distributions contingent on cube.dims.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
-        one which has already been initialized (including any corner values),
-        and which will compute its own common cells from the margins later.
+        one which has already been initialized (including any corner values).
+        We will compute its common cells from the margins later in self.reduce.
         """
         sums, valid_counts = regions
 
@@ -124,6 +147,7 @@ class ffunc_sum(ffunc):
         cube.walk(_fill)
 
     def reduce(self, cube, regions):
+        """Return `regions` with common cells calculated and margins removed."""
         # Calculate common slices by subtracting uncommon results from margins.
         sums, valid_counts = regions
         cube._compute_common_cells_from_marginal_diffs(sums)

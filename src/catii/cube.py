@@ -19,16 +19,16 @@ class ccube:
 
     The ccube itself does not own the output; instead, use ffunc objects
     (or the shortcut methods on the ccube, like `count`) to calculate the
-    aggregate data in a ccube. Multiple ffuncs may apply to a single ccube.
+    aggregate data of a ccube. Multiple ffuncs may apply to a single ccube.
 
-    A single ccube only represents a single "table"; that is, the input dims
-    must all be 1-dimensional, and all interact to form the output. To work
-    with more dimensions, iterate over the Cartesian product of the higher
-    dimensions, take 1-D slices of each iindex, form a ccube for each,
-    and stack them. It can save time to initialize "one big region" for each
-    ffunc, representing the stacked output, then, after filling each subcube,
-    do a single reduce operation on the stacked cube to perform all of the
-    marginal differencing in one pass.
+    The core operation on a ccube is interaction; that is, the grouping
+    of rows by the combinations of distinct categorical dimensions. To work
+    with higher dimensions, we iterate over the Cartesian product of them,
+    take 1-D slices of each iindex, form a subcube for each, and stack those.
+    To save time, we initialize "one big region" for each ffunc, representing
+    the stacked output, then, after filling one subregion per subcube, do a
+    single reduce operation on the stacked cube to perform all of the marginal
+    differencing in one pass.
     """
 
     poolsize = 4
@@ -74,7 +74,7 @@ class ccube:
 
             # Margin
             self._walk(remaining_dims, base_coords + (-1,), base_set, func)
-        else:
+        elif dims:
             # Last dim. The `rowids` in each loop below are the rowids
             # that appear in all dims for this particular tuple of new_coords.
             # Any coordinate which is -1 targets the margin for that axis.
@@ -289,9 +289,9 @@ class ccube:
 
     # -------------------------------- ffuncs -------------------------------- #
 
-    def count(self, weights=None):
+    def count(self, weights=None, N=None):
         """Return the joint frequency distribution of self.dims."""
-        return self.calculate([ffunc_count(weights)])[0][0]
+        return self.calculate([ffunc_count(weights, N)])[0][0]
 
     def sum(self, summables, countables, weights=None):
         """Return sums and valid counts, contingent on self.dims.

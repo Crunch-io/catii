@@ -1,4 +1,5 @@
 import numpy
+import pytest
 
 from catii import ccube, iindex
 from catii.funcs import ffunc_count, ffunc_sum
@@ -25,6 +26,12 @@ class TestCubeCount:
 
         weights = numpy.array([0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
         assert numpy.allclose(cube.count(weights), [[1.4, 0.5], [0.7, 0.2]])
+
+    def test_count_no_dims(self):
+        cube = ccube([])
+        with pytest.raises(ValueError):
+            cube.count()
+        assert cube.count(N=100).tolist() == 100
 
 
 class TestCubeProduct:
