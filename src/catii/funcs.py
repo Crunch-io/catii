@@ -110,6 +110,7 @@ class ffunc_sum(ffunc):
     def __init__(self, summables, countables, weights=None):
         self.summables = numpy.asarray(summables)
         self.countables = numpy.asarray(countables)
+
         self.weights = weights
         if weights is not None:
             self.summables = (summables.T * weights).T
@@ -120,8 +121,10 @@ class ffunc_sum(ffunc):
         """Return NumPy arrays to fill, empty except for corner values."""
         dtype = int if self.weights is None else float
 
-        sums = numpy.zeros(cube.working_shape, dtype=self.summables.dtype)
-        valid_counts = numpy.zeros(cube.working_shape, dtype=dtype)
+        # summables may itself be an N-dimensional numeric array
+        shape = cube.working_shape + self.summables.shape[1:]
+        sums = numpy.zeros(shape, dtype=self.summables.dtype)
+        valid_counts = numpy.zeros(shape, dtype=dtype)
 
         # Set the "grand total" value in the corner of each region.
         sums[cube.corner] = numpy.sum(self.summables, axis=0)
@@ -161,8 +164,13 @@ class ffunc_sum(ffunc):
         # (within the machine's floating-point epsilon). For most values, this
         # has little effect, but when the value should be 0 but is just barely
         # not 0, it's easy to end up with e.g. 1e-09/1e-09=1 instead of 0/0=nan.
-        no_valids_mask = numpy.isclose(valid_counts, 0)
-        sums[no_valids_mask] = 0
-        valid_counts[no_valids_mask] = 0
+        if valid_counts.shape:
+            no_valids_mask = numpy.isclose(valid_counts, 0)
+            sums[no_valids_mask] = 0
+            valid_counts[no_valids_mask] = 0
+        else:
+            if numpy.isclose(valid_counts, 0):
+                sums = sums.dtype(0)
+                valid_counts = valid_counts.dtype(0)
 
         return sums, valid_counts
