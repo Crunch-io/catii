@@ -37,6 +37,11 @@ class ccube:
         self.dims = dims
 
         self.scaffold_shape = tuple(e for d in dims for e in d.shape[1:])
+        self.num_regions = reduce(operator.mul, self.scaffold_shape, 1)
+        self.parallel = (
+            self.num_regions > 2
+            and (self.dims[0].shape[0] * self.num_regions) >= BIG_REGIONS
+        )
         if interacting_shape is None:
             interacting_shape = tuple(max(coords[0] for coords in d) + 1 for d in dims)
         self.interacting_shape = interacting_shape
@@ -256,7 +261,7 @@ class ccube:
         results = [func.get_initial_regions(self) for func in funcs]
 
         def fill_one_cube(nested_coords):
-            cube = self.subcube(nested_coords)
+            subcube = self.subcube(nested_coords)
             for func, regions in zip(funcs, results):
                 flattened_slice = [
                     e for coords in nested_coords if coords is not None for e in coords
@@ -270,11 +275,10 @@ class ccube:
                     # our outer dimensions.
                     regions = [region[tuple(flattened_slice)] for region in regions]
 
-                func.fill(cube, regions)
+                func.fill(subcube, regions)
+                self.intersection_data_points += subcube.intersection_data_points
 
-        num_regions = reduce(operator.mul, self.scaffold_shape, 1)
-        parallel = num_regions > 2 and (self.numrows * num_regions) >= BIG_REGIONS
-        if parallel:
+        if self.parallel:
             with closing(multiprocessing.pool.ThreadPool(self.poolsize)) as pool:
                 pool.map(fill_one_cube, self.product)
         else:

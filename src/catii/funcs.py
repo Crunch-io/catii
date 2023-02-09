@@ -44,6 +44,35 @@ class ffunc:
         self.fill(cube, regions)
         return self.reduce(cube, regions)
 
+    @staticmethod
+    def adjust_zeros(arr, new="nan", condition=None):
+        """Set arr[isclose(condition or arr, 0)] = new and return it.
+
+        Sometimes, marginal differencing can produce minutely different results
+        (within the machine's floating-point epsilon). For most values, this
+        has little effect, but when the value should be 0 but is just barely
+        not 0, it's easy to end up with e.g. 1e-09/1e-09=1 instead of 0/0=nan.
+
+        Use this to adjust values near zero to "nan" or zero. If `condition`
+        is None (the default), then `arr` values near zero will be adjusted
+        to the given `new` value. Otherwise, `condition` must be a NumPy
+        array, and rows where it is near zero will cause the corresponding
+        rows in `arr` to be adjusted.
+
+        If the given `arr` arg is an array, it is both adjusted in place and
+        returned. NumPy scalar values are read-only, so the original cannot
+        be adjusted in place, so a new NumPy scalar instance is returned.
+        """
+        if condition is None:
+            condition = arr
+
+        if arr.shape:
+            arr[numpy.isclose(condition, 0)] = new
+        else:
+            if numpy.isclose(condition, 0):
+                arr = arr.dtype.type(new)
+        return arr
+
 
 class ffunc_count(ffunc):
     """Calculate the frequency (count) distribution of a cube.
@@ -102,28 +131,64 @@ class ffunc_count(ffunc):
 
     def reduce(self, cube, regions):
         """Return `regions` with common cells calculated and margins removed."""
-        # Calculate common slices by subtracting uncommon results from margins.
         (counts,) = regions
         cube._compute_common_cells_from_marginal_diffs(counts)
-
-        # Cut the margins off our larger result.
         output = counts[cube.marginless]
+        output = self.adjust_zeros(output, new=0)
+        return (output,)
 
-        # Sometimes, marginal differencing can produce minutely different results
-        # (within the machine's floating-point epsilon). For most values, this
-        # has little effect, but when the value should be 0 but is just barely
-        # not 0, it's easy to end up with e.g. 1e-09/1e-09=1 instead of 0/0=nan.
-        if output.shape:
-            output[numpy.isclose(output, 0)] = 0
-        else:
-            if numpy.isclose(output, 0):
-                output = output.dtype.type(0)
 
+class ffunc_valid_count(ffunc):
+    """Calculate the valid count of an array contingent on a cube.
+
+    The `countables` arg must be a NumPy array of booleans, True for valid rows
+    and False for missing rows. If `weights` is given and not None, it must be
+    a NumPy array of numeric weight values. Both correspond row-wise to any
+    cube.dims.
+    """
+
+    def __init__(self, countables, weights=None):
+        self.countables = numpy.asarray(countables)
+        self.weights = weights
+        if weights is not None:
+            self.countables = (self.countables.T * weights).T
+
+    def get_initial_regions(self, cube):
+        """Return NumPy arrays to fill, empty except for corner values."""
+        # countables may itself be an N-dimensional numeric array
+        shape = cube.working_shape + self.countables.shape[1:]
+        dtype = int if self.weights is None else float
+        counts = numpy.zeros(shape, dtype=dtype)
+        # Set the "grand total" value in the corner of each region.
+        counts[cube.corner] = self.countables.sum(axis=0)
+
+        return (counts,)
+
+    def fill(self, cube, regions):
+        """Fill the `regions` arrays with distributions contingent on cube.dims.
+
+        The given `regions` are assumed to be part of a (possibly larger) cube,
+        one which has already been initialized (including any corner values).
+        We will compute its common cells from the margins later in self.reduce.
+        """
+        (counts,) = regions
+
+        def _fill(x_coords, x_rowids):
+            counts[x_coords] = self.countables[x_rowids].sum(axis=0)
+
+        cube.walk(_fill)
+
+    def reduce(self, cube, regions):
+        """Return `regions` with common cells calculated and margins removed."""
+        (counts,) = regions
+        cube._compute_common_cells_from_marginal_diffs(counts)
+        output = counts[cube.marginless]
+        output = self.adjust_zeros(output, new=0)
         return (output,)
 
 
 class ffunc_sum(ffunc):
-    """Calculate the sum distribution of a cube.
+    """Calculate the sums of an array contingent on a cube.
 
     The `summables` arg must be a NumPy array of numeric values to be summed.
     The `countables` arg must be a NumPy array of booleans, True for valid rows
@@ -176,30 +241,21 @@ class ffunc_sum(ffunc):
 
     def reduce(self, cube, regions):
         """Return `regions` with common cells calculated and margins removed."""
-        # Calculate common slices by subtracting uncommon results from margins.
         sums, valid_counts = regions
+
         cube._compute_common_cells_from_marginal_diffs(sums)
         cube._compute_common_cells_from_marginal_diffs(valid_counts)
 
-        # Cut the margins off our larger result.
         sums = sums[cube.marginless]
         valid_counts = valid_counts[cube.marginless]
 
-        # Sometimes, marginal differencing can produce minutely different results
-        # (within the machine's floating-point epsilon). For most values, this
-        # has little effect, but when the value should be 0 but is just barely
-        # not 0, it's easy to end up with e.g. 1e-09/1e-09=1 instead of 0/0=nan.
-        if valid_counts.shape:
-            sums[numpy.isclose(valid_counts, 0)] = "nan"
-        else:
-            if numpy.isclose(valid_counts, 0):
-                sums = sums.dtype.type("nan")
+        sums = self.adjust_zeros(sums, condition=valid_counts)
 
         return sums
 
 
 class ffunc_mean(ffunc):
-    """Calculate the mean distribution of a cube.
+    """Calculate the means of an array contingent on a cube.
 
     The `summables` arg must be a NumPy array of numeric values to be summed.
     The `countables` arg must be a NumPy array of booleans, True for valid rows
@@ -250,27 +306,16 @@ class ffunc_mean(ffunc):
 
     def reduce(self, cube, regions):
         """Return `regions` with common cells calculated and margins removed."""
-        # Calculate common slices by subtracting uncommon results from margins.
         sums, valid_counts = regions
+
         cube._compute_common_cells_from_marginal_diffs(sums)
         cube._compute_common_cells_from_marginal_diffs(valid_counts)
 
-        # Cut the margins off our larger result.
         sums = sums[cube.marginless]
         valid_counts = valid_counts[cube.marginless]
 
-        # Sometimes, marginal differencing can produce minutely different results
-        # (within the machine's floating-point epsilon). For most values, this
-        # has little effect, but when the value should be 0 but is just barely
-        # not 0, it's easy to end up with e.g. 1e-09/1e-09=1 instead of 0/0=nan.
-        if valid_counts.shape:
-            no_valids_mask = numpy.isclose(valid_counts, 0)
-            sums[no_valids_mask] = 0
-            valid_counts[no_valids_mask] = 0
-        else:
-            if numpy.isclose(valid_counts, 0):
-                sums = sums.dtype.type(0)
-                valid_counts = valid_counts.dtype.type(0)
+        sums = self.adjust_zeros(sums, new=0, condition=valid_counts)
+        valid_counts = self.adjust_zeros(valid_counts, new=0)
 
         with numpy.errstate(divide="ignore", invalid="ignore"):
             means = sums / valid_counts
