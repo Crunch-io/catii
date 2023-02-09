@@ -3,7 +3,7 @@ import re
 import numpy
 import pytest
 
-from catii.index import iindex
+from catii import iindex
 
 
 class TestIndexCreation:

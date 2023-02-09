@@ -2,7 +2,7 @@ import numpy
 import pytest
 
 from catii import ccube, iindex
-from catii.funcs import ffunc_count, ffunc_sum
+from catii.ffuncs import ffunc_count, ffunc_sum
 
 
 class TestCubeCreation:
@@ -82,16 +82,12 @@ class TestCubeCalculate:
         ]
 
         fsum = ffunc_sum(summables=numpy.arange(8), countables=[True, False] * 4)
-        ((counts,), (sums, valid_counts)) = cube.calculate([ffunc_count(), fsum])
+        ((counts,), (sums,)) = cube.calculate([ffunc_count(), fsum])
         assert counts.tolist() == [
             [[4, 1], [1, 2]],
             [[3, 2], [3, 0]],
         ]
-        assert sums.tolist() == [
-            [[14, 0], [0, 2]],
-            [[12, 7], [9, 0]],
-        ]
-        assert valid_counts.tolist() == [
-            [[2, 0], [0, 2]],
-            [[1, 1], [2, 0]],
-        ]
+        assert (
+            str(sums.tolist())
+            == "[[[14.0, nan], [nan, 2.0]], [[12.0, 7.0], [9.0, nan]]]"
+        )

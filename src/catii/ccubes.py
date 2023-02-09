@@ -4,7 +4,7 @@ import operator
 from contextlib import closing
 from functools import reduce
 
-from .funcs import ffunc_count, ffunc_sum
+from .ffuncs import ffunc_count, ffunc_sum
 from .set_operations import set_intersect_merge_np
 
 BIG_REGIONS = 1 << 30  # 1G, max input data size before we use threads <shrug>

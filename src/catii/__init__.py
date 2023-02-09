@@ -1,4 +1,4 @@
-from .cube import ccube
-from .index import iindex
+from .ccubes import ccube
+from .iindexes import iindex
 
 __all__ = ["ccube", "iindex"]

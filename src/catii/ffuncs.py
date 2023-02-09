@@ -67,6 +67,8 @@ class ffunc:
             condition = arr
 
         if arr.shape:
+            if new == "nan" and "i" in arr.dtype.str:
+                arr = arr.astype(float)
             arr[numpy.isclose(condition, 0)] = new
         else:
             if numpy.isclose(condition, 0):
@@ -251,7 +253,7 @@ class ffunc_sum(ffunc):
 
         sums = self.adjust_zeros(sums, condition=valid_counts)
 
-        return sums
+        return (sums,)
 
 
 class ffunc_mean(ffunc):
@@ -320,4 +322,4 @@ class ffunc_mean(ffunc):
         with numpy.errstate(divide="ignore", invalid="ignore"):
             means = sums / valid_counts
 
-        return means
+        return (means,)
