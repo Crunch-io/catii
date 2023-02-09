@@ -69,9 +69,9 @@ Call shift_common() to normalize this. Consequently, two indexes
 could represent the same exact data values but with different common values
 if one or both have not been normalized; these will not be equal using `==`.
 
-## Indexes versus arrays
+### Indexes versus arrays
 
-Although the iindex class can represent the same data as a NumPy array,
+Although the iindex class can represent the same information as a NumPy array,
 it purposefully does NOT implement the NumPY API, because mixing arrays and
 indexes often results in crudely transforming the sparse index into a dense
 array, obliterating all of the benefits of the index. Iterating over all of
@@ -104,5 +104,140 @@ Unlike most array implementations, the machine type of the distinct values is
 not a focus--they may be any hashable Python type. In practice, especially
 when mixing indexes with arrays, it is generally best to treat coordinates
 as exactly that: points in a linear space of distinct values, usually
-contiguous integers starting from 0. Any names or other attributes
-should be separate metadata.
+contiguous integers starting from 0. This is required when using ccubes
+(below), so storing data as integers saves precious query time. Any names
+or other attributes should be separate metadata.
+
+## The contingency cube (ccube)
+
+Analyses generally consist of summary statistics of variables (iindexes
+or arrays), quite often contingent on, or "grouped by", other iindexes.
+For example, you might want to know the number of people who are affiliated
+with a particular political party (say, 0=None, 1=Rep, 2=Dem), but grouped
+by education level to see if there is any significant correlation between
+the two variables. With catii, you calculate this using a ccube:
+
+```#python
+>>> from catii import ccube, iindex
+>>> party = iindex({(1,): [0, 2, 5], (2,): [4]}, common=0, shape=(8,))
+>>> educ = iindex({(0,): [2, 5, 4], (2,): [4]}, common=1, shape=(8,))
+>>> ccube([educ, party]).count()
+array([[1, 2, 0],
+       [3, 1, 0],
+       [0, 0, 1]])
+```
+
+The returned array is a 2-dimensional "hypercube": a contingency table
+(or "crosstab") representing the frequency distribution of these two variables
+for our sample. You're probably familiar seeing it in a more tabular form:
+
+```
+         party
+          0    1    2
+e        --   --   --
+d    0 |  1    2    0
+u    1 |  3    1    0
+c    2 |  0    0    1
+```
+
+We passed our two variables as dimensions to the ccube, and asked for a count
+of their interaction. Since we provided two 1-D iindexes, the output was 2-D.
+If either of our input iindexes had additional axes, the output would be three
+or more dimensions.
+
+The dimensions must all correspond row-wise; that is, when we say "the educ
+variable has value 0 in row 5" and "the party variable has value 1 in row 5",
+we mean that "row 5" in both refers to the same observation in our data.
+We aggregate over the rows, so they are never a dimension in our output.
+
+When the dimension iindexes include additional axes, they are assumed to be
+independent, and the ccube iterates over their Cartesian product. For each
+combination of higher axes, it forms a subcube of 1-D slices of each dimension,
+and stacks their output. For example, if instead of "party" we had a 2-D
+"genre" variable for recording which music genres (say, 0=classical, 1=pop",
+and 2=alternative) people like or dislike (0=missing, 1=like, 2=dislike),
+we would see an additional dimension in our cube output. The like/dislike
+axis would be distinct values and therefore the first coordinate in our
+iindex tuples. The genre axis would be placed in the second coordinates.
+
+```#python
+>>> genre = iindex.from_array([
+    [0, 0, 0],
+    [0, 0, 1],
+    [0, 1, 0],
+    [2, 1, 1],
+    [1, 0, 0],
+    [2, 2, 1]
+    ])
+>>> genre
+iindex(shape=(6, 3), common=0, entries={
+    (1, 0): array([4], dtype=uint32),
+    (1, 1): array([2, 3], dtype=uint32),
+    (1, 2): array([1, 3, 5], dtype=uint32),
+    (2, 0): array([3, 5], dtype=uint32),
+    (2, 1): array([5], dtype=uint32)
+    })
+>>> ccube([genre]).count()
+array([[3, 1, 2],  # classical
+       [3, 2, 1],  # pop
+       [3, 3, 0]]) # alternative
+```
+
+The additional axes are always moved to be outermost (in reverse precedence),
+so the result above iterates over the genre axis first, and then more tightly
+over the missing/like/dislike values.
+
+### Frequency functions (ffuncs)
+
+In addition to counting, catii provides other aggregate functions to use with
+cubes: sum, mean, and valid count. These all take at least one additional "fact
+variable" as an argument; that is, the data to sum, or average, or count valid
+values within. These must also correspond row-wise to the cube dimensions.
+
+Each of these operate just like count, and return a cube of results.
+
+### Weights
+
+All of the ffuncs take an optional "weights" argument. If given, it must also
+correspond row-wise to the dimensions and any fact variables. The function then
+weights the data by these values. For example:
+
+```#python
+>>> from catii import ccube, iindex
+>>> import numpy
+>>> party = iindex({(1,): [0, 2, 5], (2,): [4]}, common=0, shape=(8,))
+>>> ccube([party]).count()
+array([4, 3, 1])
+>>> weights = numpy.arange(10) / 10.0
+>>> weights
+array([0. , 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9])
+>>> ccube([party]).count(weights)
+array([3.4, 0.7, 0.4])
+```
+
+### Combined cube calculation
+
+Often, when finding summaries like a weighted count, we also want an unweighted
+count, or we want to show means but with the "base" counts. We could simply
+form one cube and call each shortcut method:
+
+```#python
+>>> c = ccube([educ, party])
+>>> c.mean(arr)
+>>> c.count()
+```
+
+However, that has to form the interaction of the dimensions twice. If our educ
+and party variables have millions of rows, or are very dense, or have
+hundreds of categories, or additional axes, or if we cross additional variables,
+this step can quickly multiply in execution time. You can save time by using
+ccube.calculate instead and pass a list of ffuncs:
+
+```#python
+>>> from catii import ffuncs
+>>> c = ccube([educ, party])
+>>> c.calculate([ffuncs.ffunc_mean(arr), ffuncs.ffunc_count()])
+```
+
+This iterates over our educ and party dimensions once, and passes
+each distinct combination of coordinates to each ffunc.

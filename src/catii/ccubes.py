@@ -4,7 +4,7 @@ import operator
 from contextlib import closing
 from functools import reduce
 
-from .ffuncs import ffunc_count, ffunc_sum
+from . import ffuncs
 from .set_operations import set_intersect_merge_np
 
 BIG_REGIONS = 1 << 30  # 1G, max input data size before we use threads <shrug>
@@ -295,10 +295,20 @@ class ccube:
 
     def count(self, weights=None, N=None):
         """Return the joint frequency distribution of self.dims."""
-        return self.calculate([ffunc_count(weights, N)])[0][0]
+        return self.calculate([ffuncs.ffunc_count(weights, N)])[0][0]
+
+    def valid_count(self, countables, weights=None):
+        """Return the count of "valid" (True) values, contingent on self.dims.
+
+        The given `countables` arg must be a NumPy array-like of booleans,
+        with the same rows as each of self.dims: True to be considered a valid
+        value and False to be considered missing. If weights are provided,
+        any weight=0 will result in a missing row.
+        """
+        return self.calculate([ffuncs.ffunc_valid_count(countables, weights)])[0]
 
     def sum(self, summables, countables, weights=None):
-        """Return sums and valid counts, contingent on self.dims.
+        """Return sums, contingent on self.dims.
 
         The given `summables` arg must be a NumPy array-like of things to sum,
         with the same rows as each of self.dims.
@@ -308,4 +318,17 @@ class ccube:
         value and False to be considered missing. If weights are provided,
         any weight=0 will result in a missing row.
         """
-        return self.calculate([ffunc_sum(summables, countables, weights)])[0]
+        return self.calculate([ffuncs.ffunc_sum(summables, countables, weights)])[0]
+
+    def mean(self, summables, countables, weights=None):
+        """Return means, contingent on self.dims.
+
+        The given `summables` arg must be a NumPy array-like of things to mean,
+        with the same rows as each of self.dims.
+
+        The given `countables` arg must be a NumPy array-like of booleans,
+        with the same rows as each of self.dims: True to be considered a valid
+        value and False to be considered missing. If weights are provided,
+        any weight=0 will result in a missing row.
+        """
+        return self.calculate([ffuncs.ffunc_mean(summables, countables, weights)])[0]
