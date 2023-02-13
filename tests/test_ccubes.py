@@ -4,6 +4,8 @@ import pytest
 from catii import ccube, iindex
 from catii.ffuncs import ffunc_count, ffunc_sum
 
+from . import arr_eq
+
 
 class TestCubeCreation:
     def test_direct_construction(self):
@@ -16,19 +18,16 @@ class TestCubeCreation:
         assert cube.shape == (2, 2)
 
 
-class TestCubeCount:
-    def test_simple_count(self):
+class TestCubeDimensions:
+    def test_cube_1d_x_1d(self):
         idx1 = iindex({(1,): [0, 2, 7]}, 0, (8,))
         idx2 = iindex({(1,): [0, 2, 5]}, 0, (8,))
         cube = ccube([idx1, idx2])
-
         assert cube.count().tolist() == [[4, 1], [1, 2]]
 
-        weights = numpy.array([0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
-        assert numpy.allclose(cube.count(weights), [[1.4, 0.5], [0.7, 0.2]])
-
-    def test_count_no_dims(self):
+    def test_cube_0d(self):
         cube = ccube([])
+        assert cube.valid_count([True, False, True, False, True]).tolist() == 3
         with pytest.raises(ValueError):
             cube.count()
         assert cube.count(N=100).tolist() == 100
@@ -68,26 +67,29 @@ class TestCubeCalculate:
         # [1, 0, 1, 0, 0, 0, 0, 1]
         idx1 = iindex({(1,): [0, 2, 7]}, 0, (8,))
         cube = ccube([idx1, idx1])
-        (counts,) = cube.calculate([ffunc_count()])[0]
+        counts = cube.calculate([ffunc_count()])[0]
         assert counts.tolist() == [[5, 0], [0, 3]]
 
         # 0: [1, 0, 1, 0, 0, 1, 0, 0],
         # 1: [0, 0, 0, 1, 1, 0, 0, 0]
         idx2 = iindex({(1, 0): [0, 2, 5], (1, 1): [3, 4]}, 0, (8, 2))
         cube = ccube([idx1, idx2])
-        (counts,) = cube.calculate([ffunc_count()])[0]
+        counts = cube.calculate([ffunc_count()])[0]
         assert counts.tolist() == [
             [[4, 1], [1, 2]],
             [[3, 2], [3, 0]],
         ]
 
         fsum = ffunc_sum(summables=numpy.arange(8), countables=[True, False] * 4)
-        ((counts,), (sums,)) = cube.calculate([ffunc_count(), fsum])
+        (counts, (sums,)) = cube.calculate([ffunc_count(), fsum])
         assert counts.tolist() == [
             [[4, 1], [1, 2]],
             [[3, 2], [3, 0]],
         ]
-        assert (
-            str(sums.tolist())
-            == "[[[14.0, nan], [nan, 2.0]], [[12.0, 7.0], [9.0, nan]]]"
+        assert arr_eq(
+            sums,
+            [
+                [[14.0, float("nan")], [float("nan"), 2.0]],
+                [[12.0, 7.0], [9.0, float("nan")]],
+            ],
         )

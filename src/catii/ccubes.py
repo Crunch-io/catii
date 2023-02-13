@@ -32,6 +32,7 @@ class ccube:
     """
 
     poolsize = 4
+    debug = False
 
     def __init__(self, dims, interacting_shape=None):
         self.dims = dims
@@ -258,10 +259,18 @@ class ccube:
 
     def calculate(self, funcs):
         """Return a list of aggregates, one NumPy array for each ffunc."""
+        if self.debug:
+            print("\nccube.calculate(%s):" % (funcs,))
         results = [func.get_initial_regions(self) for func in funcs]
+        if self.debug:
+            print("INITIAL REGIONS:")
+            for func, regions in zip(funcs, results):
+                print(func, ":", regions)
 
         def fill_one_cube(nested_coords):
             subcube = self.subcube(nested_coords)
+            if self.debug:
+                print("FILL SUBCUBE:", nested_coords)
             for func, regions in zip(funcs, results):
                 flattened_slice = [
                     e for coords in nested_coords if coords is not None for e in coords
@@ -277,6 +286,8 @@ class ccube:
 
                 func.fill(subcube, regions)
                 self.intersection_data_points += subcube.intersection_data_points
+                if self.debug:
+                    print(func, ":=", regions)
 
         if self.parallel:
             with closing(multiprocessing.pool.ThreadPool(self.poolsize)) as pool:
@@ -289,46 +300,132 @@ class ccube:
             for nested_coords in self.product:
                 fill_one_cube(nested_coords)
 
-        return [func.reduce(self, regions) for func, regions in zip(funcs, results)]
+        output = [func.reduce(self, regions) for func, regions in zip(funcs, results)]
+        if self.debug:
+            print("OUTPUT:")
+            for func, regions in zip(funcs, output):
+                print(func, ":", regions)
+        return output
 
     # -------------------------------- ffuncs -------------------------------- #
 
-    def count(self, weights=None, N=None):
-        """Return the joint frequency distribution of self.dims."""
-        return self.calculate([ffuncs.ffunc_count(weights, N)])[0][0]
+    def count(self, weights=None, N=None, ignore_missing=False, return_validity=False):
+        """Return the counts of self.dims.
 
-    def valid_count(self, countables, weights=None):
-        """Return the count of "valid" (True) values, contingent on self.dims.
+        If `ignore_missing` is False (the default), then any missing values
+        are propagated so that outputs also have a missing value in any cell
+        that had a missing value in the weights that contributed to that cell.
+        If `ignore_missing` is True, such input rows are ignored and do not
+        contribute to the output, much like NumPy's `nansum` or R's `na.rm = TRUE'.
 
-        The given `countables` arg must be a NumPy array-like of booleans,
-        with the same rows as each of self.dims: True to be considered a valid
-        value and False to be considered missing. If weights are provided,
-        any weight=0 will result in a missing row.
+        If `return_validity` is False (the default), the `reduce` method will
+        return a single numeric NumPy array of counts. Any NaN values in it indicate
+        missings: an output cell that had no inputs, or a missing weight value,
+        and therefore no count. If True, the `reduce` method will return a NumPy
+        array of counts, and a second "validity" NumPy array of booleans.
+        Missing values (an output cell that had no inputs, or a missing
+        weight value, and therefore no count) will have 0.0 in the former
+        and True in the latter.
+
+        If `weights` is given and not None, it must be a NumPy array of numeric
+        weight values, or a (weights, validity) tuple, corresponding row-wise
+        to any cube.dims.
         """
-        return self.calculate([ffuncs.ffunc_valid_count(countables, weights)])[0]
+        return self.calculate(
+            [ffuncs.ffunc_count(weights, N, ignore_missing, return_validity)]
+        )[0]
 
-    def sum(self, summables, countables, weights=None):
-        """Return sums, contingent on self.dims.
+    def valid_count(
+        self, arr, weights=None, ignore_missing=False, return_validity=False
+    ):
+        """Return the valid counts of an array contingent on self.dims.
 
-        The given `summables` arg must be a NumPy array-like of things to sum,
-        with the same rows as each of self.dims.
+        The `arr` arg must be a NumPy array of numeric values to be counted,
+        or a tuple of (values, validity) arrays, corresponding row-wise
+        to any cube.dims.
 
-        The given `countables` arg must be a NumPy array-like of booleans,
-        with the same rows as each of self.dims: True to be considered a valid
-        value and False to be considered missing. If weights are provided,
-        any weight=0 will result in a missing row.
+        If `ignore_missing` is False (the default), then any missing values
+        are propagated so that outputs also have a missing value in any cell
+        that had a missing value in one of the rows in the fact variable
+        or weight that contributed to that cell. If `ignore_missing` is True,
+        such input rows are ignored and do not contribute to the output,
+        much like NumPy's `nansum` or R's `na.rm = TRUE'.
+
+        If `return_validity` is False (the default), the `reduce` method will
+        return a single numeric NumPy array of counts. Any NaN values in it indicate
+        missings: an output cell that had no inputs, or a missing weight value,
+        and therefore no count. If True, the `reduce` method will return a NumPy
+        array of counts, and a second "validity" NumPy array of booleans.
+        Missing values (an output cell that had no inputs, or a missing
+        weight value, and therefore no count) will have 0.0 in the former
+        and True in the latter.
+
+        If `weights` is given and not None, it must be a NumPy array of numeric
+        weight values, or a (weights, validity) tuple, corresponding row-wise
+        to any cube.dims.
         """
-        return self.calculate([ffuncs.ffunc_sum(summables, countables, weights)])[0]
+        return self.calculate(
+            [ffuncs.ffunc_valid_count(arr, weights, ignore_missing, return_validity)]
+        )[0]
 
-    def mean(self, summables, countables, weights=None):
-        """Return means, contingent on self.dims.
+    def sum(self, arr, weights=None, ignore_missing=False, return_validity=False):
+        """Return the sums of an array contingent on self.dims.
 
-        The given `summables` arg must be a NumPy array-like of things to mean,
-        with the same rows as each of self.dims.
+        The `arr` arg must be a NumPy array of numeric values to be summed,
+        or a tuple of (values, validity) arrays, corresponding row-wise
+        to any cube.dims.
 
-        The given `countables` arg must be a NumPy array-like of booleans,
-        with the same rows as each of self.dims: True to be considered a valid
-        value and False to be considered missing. If weights are provided,
-        any weight=0 will result in a missing row.
+        If `ignore_missing` is False (the default), then any missing values
+        are propagated so that outputs also have a missing value in any cell
+        that had a missing value in one of the rows in the fact variable
+        or weight that contributed to that cell. If `ignore_missing` is True,
+        such input rows are ignored and do not contribute to the output,
+        much like NumPy's `nansum` or R's `na.rm = TRUE'.
+
+        If `return_validity` is False (the default), the `reduce` method will
+        return a single numeric NumPy array of sums. Any NaN values in it indicate
+        missings: an output cell that had no inputs, or a missing weight value,
+        and therefore no sum. If True, the `reduce` method will return a NumPy
+        array of sums, and a second "validity" NumPy array of booleans.
+        Missing values (an output cell that had no inputs, or a missing
+        weight value, and therefore no sum) will have 0.0 in the former
+        and True in the latter.
+
+        If `weights` is given and not None, it must be a NumPy array of numeric
+        weight values, or a (weights, validity) tuple, corresponding row-wise
+        to any cube.dims.
         """
-        return self.calculate([ffuncs.ffunc_mean(summables, countables, weights)])[0]
+        return self.calculate(
+            [ffuncs.ffunc_sum(arr, weights, ignore_missing, return_validity)]
+        )[0]
+
+    def mean(self, arr, weights=None, ignore_missing=False, return_validity=False):
+        """Return the means of an array contingent on self.dims.
+
+        The `arr` arg must be a NumPy array of numeric values to be meaned,
+        or a tuple of (values, validity) arrays, corresponding row-wise
+        to any cube.dims.
+
+        If `ignore_missing` is False (the default), then any missing values
+        are propagated so that outputs also have a missing value in any cell
+        that had a missing value in one of the rows in the fact variable
+        or weight that contributed to that cell. If `ignore_missing` is True,
+        such input rows are ignored and do not contribute to the output,
+        much like NumPy's `nanmean` or R's `na.rm = TRUE'.
+
+        If `return_validity` is False (the default), the `reduce` method will
+        return a single numeric NumPy array of means. Any NaN values in it indicate
+        missings: an output cell that had no inputs, or a missing weight value,
+        and therefore no mean. If True, the `reduce` method will return a NumPy
+        array of means, and a second "validity" NumPy array of booleans.
+        Missing values (an output cell that had no inputs, or a missing
+        weight value, and therefore no mean) will have 0.0 in the former
+        and True in the latter.
+
+        If `weights` is given and not None, it must be a NumPy array of numeric
+        weight values, or a (weights, validity) tuple, corresponding row-wise
+        to any cube.dims.
+        """
+        return self.calculate(
+            [ffuncs.ffunc_mean(arr, weights, ignore_missing, return_validity)]
+        )[0]

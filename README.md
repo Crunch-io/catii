@@ -215,6 +215,48 @@ array([0. , 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9])
 array([3.4, 0.7, 0.4])
 ```
 
+### Missing values
+
+Fact variables and weight variables may take one of two forms:
+    * a single NumPy array, where missing values are represented by NaN or NaT
+    * a pair of NumPy arrays, where the first contains values and the second
+      is a "validity" array of booleans: True meaning "valid" and False meaning
+      "missing". Where False, the corresponding values in the first array
+      are ignored.
+
+To some extent, which format you choose depends on your application and how
+your data is already represented. Note, however, that NumPy arrays of `int`
+or `str` have no standard way to represent missing values. Rather than nominate
+sentinel values for these and similar types, you may pass a separate "validity"
+array of booleans, and you might therefore consider doing so for all dtypes.
+Note this is slightly faster, as well.
+
+Functions provided here all have a `reduce` method which returns cube output
+as NumPy arrays; these outputs may also have a missing value in any cell that
+1) had no rows in the inputs with cube dimensions corresponding to it, or
+2) had rows but corresponding fact values or weights were missing values ("all"
+if `ignore_missing` else "any").
+
+This is somewhat divergent from standard NumPy which, for example, defaults
+numpy.sum([]) to 0.0. However, consumers of catii often need to distinguish
+a sum or mean of [0, 0] from one of []. You are, of course, free to take the
+output and set arr[arr.isnan()] = 0 if you desire.
+
+Each ffunc has an optional `ignore_missing` arg. If False (the default), then
+any missing values (values=NaN or validity=False) are propagated so that
+outputs also have a missing value in any cell that had a missing value in
+one of the rows in the fact variable or weight that contributed to that cell.
+If `ignore_missing` is True, such input rows are ignored and do not contribute
+to the output, much like NumPy's `nanmean` or R's `na.rm = TRUE`. Note this
+is also faster and uses less memory.
+
+The `reduce` methods herein all default to the "single NumPy array" format,
+with NaN values indicating missingness. Pass `return_validity=True` to obtain
+the 2-tuple of (values, validity) arrays instead. Most functions here will
+replace NaN values in the `values` array with 0 in that case. Therefore,
+if you prefer e.g. `sum([])` to return 0, you can choose this option and
+simply throw away the `validity` response.
+
 ### Combined cube calculation
 
 Often, when finding summaries like a weighted count, we also want an unweighted
@@ -228,15 +270,15 @@ form one cube and call each shortcut method:
 ```
 
 However, that has to form the interaction of the dimensions twice. If our educ
-and party variables have millions of rows, or are very dense, or have
-hundreds of categories, or additional axes, or if we cross additional variables,
-this step can quickly multiply in execution time. You can save time by using
+and party variables have millions of rows, or are very dense, or have hundreds
+of categories, or additional axes, or if we cross additional variables, this
+step can quickly multiply in execution time. You can save time by using
 ccube.calculate instead and pass a list of ffuncs:
 
 ```#python
 >>> from catii import ffuncs
 >>> c = ccube([educ, party])
->>> c.calculate([ffuncs.ffunc_mean(arr), ffuncs.ffunc_count()])
+>>> means, counts = c.calculate([ffuncs.ffunc_mean(arr), ffuncs.ffunc_count()])
 ```
 
 This iterates over our educ and party dimensions once, and passes
