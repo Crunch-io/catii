@@ -144,19 +144,19 @@ class TestXfuncMeanIgnoreMissing:
         assert arr_eq(means, [[3.5, 4.0], [float("nan"), 1.0]])
 
 
-class TestXfuncMeanReturnValidity:
-    def test_return_validity(self):
+class TestXfuncMeanReturnMissingAs:
+    def test_return_missing_as(self):
         factvar = [1.0, 2.0, float("nan"), 4.0, 5.0]
 
         means = xcube([arr1]).mean(factvar)
         assert arr_eq(means, [11 / 3.0, float("nan")])
 
-        means, validity = xcube([arr1]).mean(factvar, return_validity=True)
+        means, validity = xcube([arr1]).mean(factvar, return_missing_as=(0, False))
         assert means.tolist() == [11 / 3.0, 0.0]
         assert validity.tolist() == [True, False]
 
         means, validity = xcube([arr1]).mean(
-            factvar, ignore_missing=True, return_validity=True
+            factvar, ignore_missing=True, return_missing_as=(0, False)
         )
         assert means.tolist() == [11 / 3.0, 1.0]
         assert validity.tolist() == [True, True]
@@ -164,6 +164,8 @@ class TestXfuncMeanReturnValidity:
         means = xcube([arr1, arr2]).mean(factvar)
         assert arr_eq(means, [[3.5, 4.0], [float("nan"), 1.0]])
 
-        means, validity = xcube([arr1, arr2]).mean(factvar, return_validity=True)
+        means, validity = xcube([arr1, arr2]).mean(
+            factvar, return_missing_as=(0, False)
+        )
         assert means.tolist() == [[3.5, 4.0], [0.0, 1.0]]
         assert validity.tolist() == [[True, True], [False, True]]

@@ -132,19 +132,21 @@ class TestXfuncValidCountIgnoreMissing:
         assert arr_eq(counts, [[2, 1], [float("nan"), 1]])
 
 
-class TestXfuncValidCountReturnValidity:
-    def test_return_validity(self):
+class TestXfuncValidCountReturnMissingAs:
+    def test_return_missing_as(self):
         factvar = [1.0, 2.0, float("nan"), 4.0, 5.0]
 
         counts = xcube([arr1]).valid_count(factvar)
         assert arr_eq(counts, [3, float("nan")])
 
-        counts, validity = xcube([arr1]).valid_count(factvar, return_validity=True)
+        counts, validity = xcube([arr1]).valid_count(
+            factvar, return_missing_as=(0, False)
+        )
         assert counts.tolist() == [3, 0]
         assert validity.tolist() == [True, False]
 
         counts, validity = xcube([arr1]).valid_count(
-            factvar, ignore_missing=True, return_validity=True
+            factvar, ignore_missing=True, return_missing_as=(0, False)
         )
         assert counts.tolist() == [3, 1]
         assert validity.tolist() == [True, True]
@@ -153,7 +155,7 @@ class TestXfuncValidCountReturnValidity:
         assert arr_eq(counts, [[2, 1], [float("nan"), 1]])
 
         counts, validity = xcube([arr1, arr2]).valid_count(
-            factvar, return_validity=True
+            factvar, return_missing_as=(0, False)
         )
         assert counts.tolist() == [[2, 1], [0, 1]]
         assert validity.tolist() == [[True, True], [False, True]]

@@ -162,19 +162,19 @@ class TestXfuncSumIgnoreMissing:
         assert arr_eq(sums, [[7.0, 4.0], [float("nan"), 1.0]])
 
 
-class TestXfuncSumReturnValidity:
-    def test_return_validity(self):
+class TestXfuncSumReturnMissingAs:
+    def test_return_missing_as(self):
         factvar = [1.0, 2.0, float("nan"), 4.0, 5.0]
 
         sums = xcube([arr1]).sum(factvar)
         assert arr_eq(sums, [11, float("nan")])
 
-        sums, validity = xcube([arr1]).sum(factvar, return_validity=True)
+        sums, validity = xcube([arr1]).sum(factvar, return_missing_as=(0, False))
         assert sums.tolist() == [11, 0.0]
         assert validity.tolist() == [True, False]
 
         sums, validity = xcube([arr1]).sum(
-            factvar, ignore_missing=True, return_validity=True
+            factvar, ignore_missing=True, return_missing_as=(0, False)
         )
         assert sums.tolist() == [11, 1.0]
         assert validity.tolist() == [True, True]
@@ -182,6 +182,6 @@ class TestXfuncSumReturnValidity:
         sums = xcube([arr1, arr2]).sum(factvar)
         assert arr_eq(sums, [[7.0, 4.0], [float("nan"), 1.0]])
 
-        sums, validity = xcube([arr1, arr2]).sum(factvar, return_validity=True)
+        sums, validity = xcube([arr1, arr2]).sum(factvar, return_missing_as=(0, False))
         assert sums.tolist() == [[7.0, 4.0], [0.0, 1.0]]
         assert validity.tolist() == [[True, True], [False, True]]

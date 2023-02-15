@@ -60,22 +60,16 @@ class TestCubeCalculate:
         idx1 = iindex({(1,): [0, 2, 7]}, 0, (8,))
         cube = ccube([idx1, idx1])
         counts = cube.calculate([ffunc_count()])[0]
-        assert counts.tolist() == [[5, 0], [0, 3]]
+        assert arr_eq(counts, [[5, float("nan")], [float("nan"), 3]])
 
         # 0: [1, 0, 1, 0, 0, 1, 0, 0],
         # 1: [0, 0, 0, 1, 1, 0, 0, 0]
         idx2 = iindex({(1, 0): [0, 2, 5], (1, 1): [3, 4]}, 0, (8, 2))
         cube = ccube([idx1, idx2])
         counts = cube.calculate([ffunc_count()])[0]
-        assert counts.tolist() == [
-            [[4, 1], [1, 2]],
-            [[3, 2], [3, 0]],
-        ]
+        assert arr_eq(counts, [[[4, 1], [1, 2]], [[3, 2], [3, float("nan")]],])
 
         fsum = ffunc_sum((numpy.arange(8)))
         counts, sums = cube.calculate([ffunc_count(), fsum])
-        assert counts.tolist() == [
-            [[4, 1], [1, 2]],
-            [[3, 2], [3, 0]],
-        ]
-        assert arr_eq(sums, [[[14, 5], [7, 2]], [[12, 7], [9, 0]],],)
+        assert arr_eq(counts, [[[4, 1], [1, 2]], [[3, 2], [3, float("nan")]],])
+        assert arr_eq(sums, [[[14, 5], [7, 2]], [[12, 7], [9, 0]]])

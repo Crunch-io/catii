@@ -148,17 +148,17 @@ class TestFfuncCountIgnoreMissing:
         assert arr_eq(counts, [[0.3, 1.0], [0.99, 0.25]])
 
 
-class TestFfuncCountReturnValidity:
-    def test_return_validity(self):
+class TestFfuncCountReturnMissingAs:
+    def test_return_missing_as(self):
         counts = ccube([idx1]).count(weights=wt)
         assert arr_eq(counts, [float("nan"), (0.25 + 0.99)])
 
-        counts, validity = ccube([idx1]).count(weights=wt, return_validity=True)
+        counts, validity = ccube([idx1]).count(weights=wt, return_missing_as=(0, False))
         assert counts.tolist() == [0, (0.25 + 0.99)]
         assert validity.tolist() == [False, True]
 
         counts, validity = ccube([idx1]).count(
-            weights=wt, ignore_missing=True, return_validity=True
+            weights=wt, ignore_missing=True, return_missing_as=(0, False)
         )
         assert counts.tolist() == [(0.3 + 1.0), (0.25 + 0.99)]
         assert validity.tolist() == [True, True]
@@ -166,6 +166,15 @@ class TestFfuncCountReturnValidity:
         counts = ccube([idx1, idx2]).count(weights=wt)
         assert arr_eq(counts, [[float("nan"), 1.0], [0.99, 0.25]])
 
-        counts, validity = ccube([idx1, idx2]).count(weights=wt, return_validity=True)
+        counts, validity = ccube([idx1, idx2]).count(
+            weights=wt, return_missing_as=(0, False)
+        )
         assert counts.tolist() == [[0, 1.0], [0.99, 0.25]]
         assert validity.tolist() == [[False, True], [True, True]]
+
+        counts = ccube([iindex({(2,): [0, 2]}, 0, (5,))]).count()
+        # Force cells that had no inputs to 0 by using return_missing_as=0.
+        assert arr_eq(counts, [3, float("nan"), 2])
+        counts = ccube([iindex({(2,): [0, 2]}, 0, (5,))]).count(return_missing_as=0)
+        # Force cells that had no inputs to 0 by using return_missing_as=0.
+        assert arr_eq(counts, [3, 0, 2])

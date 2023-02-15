@@ -175,19 +175,19 @@ class TestFfuncSumIgnoreMissing:
         assert arr_eq(sums, [[7.0, 4.0], [float("nan"), 1.0]])
 
 
-class TestFfuncSumReturnValidity:
-    def test_return_validity(self):
+class TestFfuncSumReturnMissingAs:
+    def test_return_missing_as(self):
         arr = [1.0, 2.0, float("nan"), 4.0, 5.0]
 
         sums = ccube([idx1]).sum(arr)
         assert arr_eq(sums, [11, float("nan")])
 
-        sums, validity = ccube([idx1]).sum(arr, return_validity=True)
+        sums, validity = ccube([idx1]).sum(arr, return_missing_as=(0, False))
         assert sums.tolist() == [11, 0.0]
         assert validity.tolist() == [True, False]
 
         sums, validity = ccube([idx1]).sum(
-            arr, ignore_missing=True, return_validity=True
+            arr, ignore_missing=True, return_missing_as=(0, False)
         )
         assert sums.tolist() == [11, 1.0]
         assert validity.tolist() == [True, True]
@@ -195,6 +195,6 @@ class TestFfuncSumReturnValidity:
         sums = ccube([idx1, idx2]).sum(arr)
         assert arr_eq(sums, [[7.0, 4.0], [float("nan"), 1.0]])
 
-        sums, validity = ccube([idx1, idx2]).sum(arr, return_validity=True)
+        sums, validity = ccube([idx1, idx2]).sum(arr, return_missing_as=(0, False))
         assert sums.tolist() == [[7.0, 4.0], [0.0, 1.0]]
         assert validity.tolist() == [[True, True], [False, True]]

@@ -251,11 +251,11 @@ to the output, much like NumPy's `nanmean` or R's `na.rm = TRUE`. Note this
 is also faster and uses less memory.
 
 The `reduce` methods herein all default to the "single NumPy array" format,
-with NaN values indicating missingness. Pass `return_validity=True` to obtain
-the 2-tuple of (values, validity) arrays instead. Most functions here will
-replace NaN values in the `values` array with 0 in that case. Therefore,
-if you prefer e.g. `sum([])` to return 0, you can choose this option and
-simply throw away the `validity` response.
+with NaN values indicating missingness. Pass e.g. `return_missing_as=(0, False)`
+to return a 2-tuple of (values, validity) arrays instead. Functions here will
+replace NaN values in the `values` array with 0 in that case. If you prefer
+`sum([])` to return 0, for example, without a second "validity" array,
+pass `return_missing_as=0`.
 
 ### Combined cube calculation
 

@@ -44,14 +44,16 @@ to the output, much like NumPy's `nanmean` or R's `na.rm = TRUE`. Note this
 is also faster and uses less memory.
 
 The `reduce` methods herein all default to the "single NumPy array" format,
-with NaN values indicating missingness. Pass `return_validity=True` to obtain
-the 2-tuple of (values, validity) arrays instead. Most functions here will
-replace NaN values in the `values` array with 0 in that case. If you prefer,
-therefore, `sum([])` to return 0, you can choose this option and simply
-throw away the `validity` response.
+with NaN values indicating missingness. Pass e.g. `return_missing_as=(0, False)`
+to return a 2-tuple of (values, validity) arrays instead. Functions here will
+replace NaN values in the `values` array with 0 in that case. If you prefer
+`sum([])` to return 0, for example, without a second "validity" array,
+pass `return_missing_as=0`.
 """
 
 import numpy
+
+NaN = float("nan")
 
 
 def as_separate_validity(arr):
@@ -153,21 +155,21 @@ class xfunc:
 class xfunc_count(xfunc):
     """Calculate the count of a cube.
 
-    If `return_validity` is False (the default), the `reduce` method will
-    return a single numeric NumPy array of counts. Any NaN values in it indicate
-    missings: an output cell that had no inputs, or a NaN weight value,
-    and therefore no count. If True, the `reduce` method will return a NumPy
-    array of counts, and a second "validity" NumPy array of booleans.
-    Missing values (an output cell that had no inputs, or a NaN weight value,
-    and therefore no count) will have 0.0 in the former and True in the latter.
-
     If `weights` is given and not None, it must be a NumPy array of numeric
     weight values, or a (weights, validity) tuple, corresponding row-wise
     to any cube.dims.
+
+    If `return_missing_as` is NaN (the default), the `reduce` method will
+    return a single numeric NumPy array of counts. Any NaN values in it
+    indicate missing cells (an output cell that had no inputs, or a NaN
+    weight value, and therefore no count). If `return_missing_as` is a 2-tuple,
+    like (0, False), the `reduce` method will return a NumPy array of counts,
+    and a second "validity" NumPy array of booleans. Missing values will have
+    0 in the former and False in the latter.
     """
 
     def __init__(
-        self, weights=None, N=None, ignore_missing=False, return_validity=False
+        self, weights=None, N=None, ignore_missing=False, return_missing_as=NaN
     ):
         if weights is None:
             validity = None
@@ -182,14 +184,18 @@ class xfunc_count(xfunc):
 
         self.weights = weights
         self.ignore_missing = ignore_missing
-        self.return_validity = return_validity
+        self.return_missing_as = return_missing_as
+        if isinstance(self.return_missing_as, tuple):
+            self.null = self.return_missing_as[0]
+        else:
+            self.null = self.return_missing_as
         if N is None and self.weights is not None and self.weights.shape:
             N = self.weights.shape[0]
         self.N = N
 
     def get_initial_regions(self, cube):
         """Return empty NumPy arrays to fill."""
-        dtype = int if self.weights is None else float
+        dtype = int if self.weights is None and not numpy.isnan(self.null) else float
 
         shape = cube.shape
         if not shape:
@@ -266,26 +272,26 @@ class xfunc_count(xfunc):
         """Return `regions` reduced to proper output."""
         if self.weights is None:
             (counts,) = regions
-            counts = self.adjust_zeros(counts, new=0)
+            missings = numpy.isclose(counts, 0)
+            counts = self.adjust_zeros(counts, self.null, condition=missings)
 
-            if self.return_validity:
-                return counts, numpy.ones(counts.shape, dtype=bool)
+            if isinstance(self.return_missing_as, tuple):
+                return counts, ~missings
             else:
                 return counts
         else:
             if self.ignore_missing:
                 counts, valid_counts = regions
+                counts = self.adjust_zeros(
+                    counts, self.null, condition=valid_counts == 0
+                )
             else:
                 counts, missing_counts = regions
+                counts = self.adjust_zeros(
+                    counts, self.null, condition=missing_counts != 0
+                )
 
-            new = 0 if self.return_validity else "nan"
-            if self.ignore_missing:
-                counts = self.adjust_zeros(counts, new, condition=valid_counts == 0)
-            else:
-                counts = self.adjust_zeros(counts, new, condition=missing_counts != 0)
-
-            if self.return_validity:
-                counts = numpy.nan_to_num(counts, copy=False)
+            if isinstance(self.return_missing_as, tuple):
                 if self.ignore_missing:
                     validity = valid_counts != 0
                 else:
@@ -302,20 +308,20 @@ class xfunc_valid_count(xfunc):
     or a tuple of (values, validity) arrays, corresponding row-wise
     to any cube.dims.
 
-    If `return_validity` is False (the default), the `reduce` method will
-    return a single numeric NumPy array of counts. Any NaN values in it indicate
-    missings: an output cell that had no inputs, or a NaN weight value,
-    and therefore no count. If True, the `reduce` method will return a NumPy
-    array of counts, and a second "validity" NumPy array of booleans.
-    Missing values (an output cell that had no inputs, or a NaN weight value,
-    and therefore no count) will have 0.0 in the former and True in the latter.
-
     If `weights` is given and not None, it must be a NumPy array of numeric
     weight values, or a (weights, validity) tuple, corresponding row-wise
     to any cube.dims.
+
+    If `return_missing_as` is NaN (the default), the `reduce` method will
+    return a single numeric NumPy array of counts. Any NaN values in it
+    indicate missing cells (an output cell that had no inputs, or a NaN
+    weight value, and therefore no count). If `return_missing_as` is a 2-tuple,
+    like (0, False), the `reduce` method will return a NumPy array of counts,
+    and a second "validity" NumPy array of booleans. Missing values will have
+    0 in the former and False in the latter.
     """
 
-    def __init__(self, arr, weights=None, ignore_missing=False, return_validity=False):
+    def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
         _, validity = as_separate_validity(arr)
         self.shape = validity.shape[1:]
         self.size = numpy.prod(self.shape, 0)
@@ -333,11 +339,15 @@ class xfunc_valid_count(xfunc):
         self.validity = validity
         self.weights = weights
         self.ignore_missing = ignore_missing
-        self.return_validity = return_validity
+        self.return_missing_as = return_missing_as
+        if isinstance(self.return_missing_as, tuple):
+            self.null = self.return_missing_as[0]
+        else:
+            self.null = self.return_missing_as
 
     def get_initial_regions(self, cube):
         """Return empty NumPy arrays to fill."""
-        dtype = int if self.weights is None else float
+        dtype = int if self.weights is None and not numpy.isnan(self.null) else float
 
         # countables may itself be an N-dimensional numeric array
         shape = cube.shape + self.countables.shape[1:]
@@ -411,17 +421,12 @@ class xfunc_valid_count(xfunc):
         """Return `regions` reduced to proper output."""
         if self.ignore_missing:
             counts, valid_counts = regions
+            counts = self.adjust_zeros(counts, self.null, condition=valid_counts == 0)
         else:
             counts, missing_counts = regions
+            counts = self.adjust_zeros(counts, self.null, condition=missing_counts != 0)
 
-        new = 0 if self.return_validity else "nan"
-        if self.ignore_missing:
-            counts = self.adjust_zeros(counts, new, condition=valid_counts == 0)
-        else:
-            counts = self.adjust_zeros(counts, new, condition=missing_counts != 0)
-
-        if self.return_validity:
-            counts = numpy.nan_to_num(counts, copy=False)
+        if isinstance(self.return_missing_as, tuple):
             if self.ignore_missing:
                 validity = valid_counts != 0
             else:
@@ -438,20 +443,20 @@ class xfunc_sum(xfunc):
     or a tuple of (values, validity) arrays, corresponding row-wise
     to any cube.dims.
 
-    If `return_validity` is False (the default), the `reduce` method will
-    return a single numeric NumPy array of sums. Any NaN values in it indicate
-    missings: an output cell that had no inputs, or a NaN weight value,
-    and therefore no sum. If True, the `reduce` method will return a NumPy
-    array of sums, and a second "validity" NumPy array of booleans.
-    Missing values (an output cell that had no inputs, or a NaN weight value,
-    and therefore no sum) will have 0.0 in the former and True in the latter.
-
     If `weights` is given and not None, it must be a NumPy array of numeric
     weight values, or a (weights, validity) tuple, corresponding row-wise
     to any cube.dims.
+
+    If `return_missing_as` is NaN (the default), the `reduce` method will
+    return a single numeric NumPy array of sums. Any NaN values in it
+    indicate missing cells (an output cell that had no inputs, or a NaN
+    weight value, and therefore no sum). If `return_missing_as` is a 2-tuple,
+    like (0, False), the `reduce` method will return a NumPy array of sums,
+    and a second "validity" NumPy array of booleans. Missing values will have
+    0 in the former and False in the latter.
     """
 
-    def __init__(self, arr, weights=None, ignore_missing=False, return_validity=False):
+    def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
         summables, validity = as_separate_validity(arr)
         self.shape = summables.shape[1:]
         self.size = numpy.prod(self.shape, 0)
@@ -469,7 +474,11 @@ class xfunc_sum(xfunc):
         self.validity = validity
         self.weights = weights
         self.ignore_missing = ignore_missing
-        self.return_validity = return_validity
+        self.return_missing_as = return_missing_as
+        if isinstance(self.return_missing_as, tuple):
+            self.null = self.return_missing_as[0]
+        else:
+            self.null = self.return_missing_as
 
     def get_initial_regions(self, cube):
         """Return empty NumPy arrays to fill."""
@@ -546,17 +555,12 @@ class xfunc_sum(xfunc):
         """Return `regions` reduced to proper output."""
         if self.ignore_missing:
             sums, valid_counts = regions
+            sums = self.adjust_zeros(sums, self.null, condition=valid_counts == 0)
         else:
             sums, missing_counts = regions
+            sums = self.adjust_zeros(sums, self.null, condition=missing_counts != 0)
 
-        new = 0 if self.return_validity else "nan"
-        if self.ignore_missing:
-            sums = self.adjust_zeros(sums, new, condition=valid_counts == 0)
-        else:
-            sums = self.adjust_zeros(sums, new, condition=missing_counts != 0)
-
-        if self.return_validity:
-            sums = numpy.nan_to_num(sums, copy=False)
+        if isinstance(self.return_missing_as, tuple):
             if self.ignore_missing:
                 validity = valid_counts != 0
             else:
@@ -573,20 +577,20 @@ class xfunc_mean(xfunc):
     or a tuple of (values, validity) arrays, corresponding row-wise
     to any cube.dims.
 
-    If `return_validity` is False (the default), the `reduce` method will
-    return a single numeric NumPy array of means. Any NaN values in it indicate
-    missings: an output cell that had no inputs, or a NaN weight value,
-    and therefore no mean. If True, the `reduce` method will return a NumPy
-    array of means, and a second "validity" NumPy array of booleans.
-    Missing values (an output cell that had no inputs, or a NaN weight value,
-    and therefore no mean) will have 0.0 in the former and True in the latter.
-
     If `weights` is given and not None, it must be a NumPy array of numeric
     weight values, or a (weights, validity) tuple, corresponding row-wise
     to any cube.dims.
+
+    If `return_missing_as` is NaN (the default), the `reduce` method will
+    return a single numeric NumPy array of means. Any NaN values in it
+    indicate missing cells (an output cell that had no inputs, or a NaN
+    weight value, and therefore no mean). If `return_missing_as` is a 2-tuple,
+    like (0, False), the `reduce` method will return a NumPy array of means,
+    and a second "validity" NumPy array of booleans. Missing values will have
+    0 in the former and False in the latter.
     """
 
-    def __init__(self, arr, weights=None, ignore_missing=False, return_validity=False):
+    def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
         summables, validity = as_separate_validity(arr)
         self.shape = summables.shape[1:]
         self.size = numpy.prod(self.shape, 0)
@@ -608,7 +612,11 @@ class xfunc_mean(xfunc):
         self.countables = countables
         self.weights = weights
         self.ignore_missing = ignore_missing
-        self.return_validity = return_validity
+        self.return_missing_as = return_missing_as
+        if isinstance(self.return_missing_as, tuple):
+            self.null = self.return_missing_as[0]
+        else:
+            self.null = self.return_missing_as
 
     def get_initial_regions(self, cube):
         """Return empty NumPy arrays to fill."""
@@ -682,21 +690,18 @@ class xfunc_mean(xfunc):
         else:
             sums, valid_counts, missing_counts = regions
 
-        sums = self.adjust_zeros(
-            sums, new=0 if self.return_validity else "nan", condition=valid_counts == 0
-        )
+        sums = self.adjust_zeros(sums, self.null, condition=valid_counts == 0)
 
         with numpy.errstate(divide="ignore", invalid="ignore"):
             means = sums / valid_counts
 
         if not self.ignore_missing:
             if means.shape:
-                means[missing_counts.nonzero()] = float("nan")
+                means[missing_counts.nonzero()] = self.null
             elif missing_counts != 0:
-                means = means.dtype.type(float("nan"))
+                means = means.dtype.type(self.null)
 
-        if self.return_validity:
-            means = numpy.nan_to_num(means, copy=False)
+        if isinstance(self.return_missing_as, tuple):
             if self.ignore_missing:
                 validity = valid_counts != 0
             else:
@@ -704,3 +709,124 @@ class xfunc_mean(xfunc):
             return means, validity
         else:
             return means
+
+
+class xfunc_op_base(xfunc):
+    """Calculate self.op() of an array contingent on a cube.
+
+    The `arr` arg must be a NumPy array of values, or a tuple of
+    (values, validity) arrays, corresponding row-wise to any cube.dims.
+
+    If `return_missing_as` is NaN (the default), the `reduce` method will
+    return a single numeric NumPy array of values. Any NaN values in it
+    indicate missing cells (an output cell that had no inputs, and therefore
+    no value). If `return_missing_as` is a 2-tuple, like (0, False),
+    the `reduce` method will return a NumPy array of values, and a second
+    "validity" NumPy array of booleans. Missing values will have 0 in the
+    former and False in the latter.
+    """
+
+    def __init__(self, arr, ignore_missing=False, return_missing_as=NaN):
+        values, validity = as_separate_validity(arr)
+        self.shape = values.shape[1:]
+        self.size = numpy.prod(self.shape, 0)
+
+        self.values = values
+        self.validity = validity
+        self.ignore_missing = ignore_missing
+        self.return_missing_as = return_missing_as
+        if isinstance(self.return_missing_as, tuple):
+            self.null = self.return_missing_as[0]
+        else:
+            self.null = self.return_missing_as
+
+    def get_initial_regions(self, cube):
+        """Return empty NumPy arrays to fill."""
+        # values may itself be an N-dimensional numeric array
+        shape = cube.shape + self.values.shape[1:]
+        if not shape:
+            shape = (1,)
+
+        dtype = float if numpy.isnan(self.null) else self.values.dtype
+        output_values = numpy.full(shape, self.null, dtype=dtype)
+        output_validity = numpy.zeros(shape, dtype=bool)
+        return output_values, output_validity
+
+    def fill(self, coordinates, regions):
+        """Fill the `regions` arrays with distributions contingent on coordinates.
+
+        The given `regions` are assumed to be part of a (possibly larger) cube,
+        one which has already been initialized (including any corner values).
+        We will compute its common cells from the margins later in self.reduce.
+        """
+        output_values, output_validity = self.flat_regions(regions)
+
+        if coordinates is None:
+            # We had no coordinates because there was no grouping defined.
+            if self.ignore_missing:
+                values = self.values[self.validity]
+                if len(values):
+                    output_values[:] = self.op(values, axis=0)
+                    output_validity[:] = True
+            else:
+                if len(self.values):
+                    if numpy.all(self.validity):
+                        output_values[:] = self.op(self.values, axis=0)
+                        output_validity[:] = True
+        else:
+            values = self.values
+            if self.ignore_missing:
+                values = values[self.validity]
+                coordinates = coordinates[self.validity]
+
+            for i in range(output_values.shape[0]):
+                matches = values[coordinates == i]
+                if len(matches):
+                    output_values[i] = self.op(matches, axis=0)
+                    output_validity[i] = True
+
+    def reduce(self, cube, regions):
+        """Return `regions` reduced to proper output."""
+        output_values, output_validity = regions
+        output_values[~output_validity] = self.null
+
+        if isinstance(self.return_missing_as, tuple):
+            return output_values, output_validity
+        else:
+            return output_values
+
+
+class xfunc_max(xfunc_op_base):
+    """Calculate the max of an array contingent on a cube.
+
+    The `arr` arg must be a NumPy array of values, or a tuple of
+    (values, validity) arrays, corresponding row-wise to any cube.dims.
+
+    If `return_missing_as` is NaN (the default), the `reduce` method will
+    return a single numeric NumPy array of maximums. Any NaN values in it
+    indicate missing cells (an output cell that had no inputs, and
+    therefore no max). If `return_missing_as` is a 2-tuple, like (0, False),
+    the `reduce` method will return a NumPy array of maximums, and a second
+    "validity" NumPy array of booleans. Missing values will have 0 in the
+    former and False in the latter.
+    """
+
+    op = staticmethod(numpy.amax)
+
+
+class xfunc_min(xfunc_op_base):
+    """Calculate the min of an array contingent on a cube.
+
+    The `arr` arg must be a NumPy array of values, or a tuple of
+    (values, validity) arrays, corresponding row-wise to any cube.dims.
+
+    If `return_missing_as` is NaN (the default), the `reduce` method will
+    return a single numeric NumPy array of minimums. Any NaN values in it
+    indicate missing cells (an output cell that had no inputs, and
+    therefore no min). If `return_missing_as` is a 2-tuple, like (0, False),
+    the `reduce` method will return a NumPy array of minimums, and a second
+    "validity" NumPy array of booleans. Missing values will have 0 in the
+    former and False in the latter.
+    """
+
+    op = staticmethod(numpy.amin)

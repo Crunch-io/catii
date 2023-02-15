@@ -165,19 +165,19 @@ class TestFfuncMeanIgnoreMissing:
         assert arr_eq(means, [[3.5, 4.0], [float("nan"), 1.0]])
 
 
-class TestFfuncMeanReturnValidity:
-    def test_return_validity(self):
+class TestFfuncMeanReturnMissingAs:
+    def test_return_missing_as(self):
         arr = [1.0, 2.0, float("nan"), 4.0, 5.0]
 
         means = ccube([idx1]).mean(arr)
         assert arr_eq(means, [11 / 3.0, float("nan")])
 
-        means, validity = ccube([idx1]).mean(arr, return_validity=True)
+        means, validity = ccube([idx1]).mean(arr, return_missing_as=(0, False))
         assert means.tolist() == [11 / 3.0, 0.0]
         assert validity.tolist() == [True, False]
 
         means, validity = ccube([idx1]).mean(
-            arr, ignore_missing=True, return_validity=True
+            arr, ignore_missing=True, return_missing_as=(0, False)
         )
         assert means.tolist() == [11 / 3.0, 1.0]
         assert validity.tolist() == [True, True]
@@ -185,6 +185,6 @@ class TestFfuncMeanReturnValidity:
         means = ccube([idx1, idx2]).mean(arr)
         assert arr_eq(means, [[3.5, 4.0], [float("nan"), 1.0]])
 
-        means, validity = ccube([idx1, idx2]).mean(arr, return_validity=True)
+        means, validity = ccube([idx1, idx2]).mean(arr, return_missing_as=(0, False))
         assert means.tolist() == [[3.5, 4.0], [0.0, 1.0]]
         assert validity.tolist() == [[True, True], [False, True]]

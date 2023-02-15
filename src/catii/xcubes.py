@@ -211,8 +211,14 @@ class xcube:
 
     # -------------------------------- xfuncs -------------------------------- #
 
-    def count(self, weights=None, N=None, ignore_missing=False, return_validity=False):
+    def count(
+        self, weights=None, N=None, ignore_missing=False, return_missing_as=xfuncs.NaN
+    ):
         """Return the counts of self.dims.
+
+        If `weights` is given and not None, it must be a NumPy array of numeric
+        weight values, or a (weights, validity) tuple, corresponding row-wise
+        to any cube.dims.
 
         If `ignore_missing` is False (the default), then any missing values
         are propagated so that outputs also have a missing value in any cell
@@ -220,25 +226,20 @@ class xcube:
         If `ignore_missing` is True, such input rows are ignored and do not
         contribute to the output, much like NumPy's `nansum` or R's `na.rm = TRUE'.
 
-        If `return_validity` is False (the default), the `reduce` method will
+        If `return_missing_as` is NaN (the default), the `reduce` method will
         return a single numeric NumPy array of counts. Any NaN values in it indicate
-        missings: an output cell that had no inputs, or a missing weight value,
-        and therefore no count. If True, the `reduce` method will return a NumPy
-        array of counts, and a second "validity" NumPy array of booleans.
-        Missing values (an output cell that had no inputs, or a missing
-        weight value, and therefore no count) will have 0.0 in the former
-        and True in the latter.
-
-        If `weights` is given and not None, it must be a NumPy array of numeric
-        weight values, or a (weights, validity) tuple, corresponding row-wise
-        to any cube.dims.
+        missings: an output cell that had no inputs, or a NaN weight value,
+        and therefore no count. If a 2-tuple like (0, False), the `reduce` method
+        will return a NumPy array of counts, and a second "validity" NumPy array
+        of booleans. Missing values will have 0 in the former and False in the
+        latter.
         """
         return self.calculate(
-            [xfuncs.xfunc_count(weights, N, ignore_missing, return_validity)]
+            [xfuncs.xfunc_count(weights, N, ignore_missing, return_missing_as)]
         )[0]
 
     def valid_count(
-        self, arr, weights=None, ignore_missing=False, return_validity=False
+        self, arr, weights=None, ignore_missing=False, return_missing_as=xfuncs.NaN
     ):
         """Return the valid counts of an array contingent on self.dims.
 
@@ -246,6 +247,10 @@ class xcube:
         or a tuple of (values, validity) arrays, corresponding row-wise
         to any cube.dims.
 
+        If `weights` is given and not None, it must be a NumPy array of numeric
+        weight values, or a (weights, validity) tuple, corresponding row-wise
+        to any cube.dims.
+
         If `ignore_missing` is False (the default), then any missing values
         are propagated so that outputs also have a missing value in any cell
         that had a missing value in one of the rows in the fact variable
@@ -253,30 +258,31 @@ class xcube:
         such input rows are ignored and do not contribute to the output,
         much like NumPy's `nansum` or R's `na.rm = TRUE'.
 
-        If `return_validity` is False (the default), the `reduce` method will
-        return a single numeric NumPy array of counts. Any NaN values in it indicate
-        missings: an output cell that had no inputs, or a missing weight value,
-        and therefore no count. If True, the `reduce` method will return a NumPy
-        array of counts, and a second "validity" NumPy array of booleans.
-        Missing values (an output cell that had no inputs, or a missing
-        weight value, and therefore no count) will have 0.0 in the former
-        and True in the latter.
-
-        If `weights` is given and not None, it must be a NumPy array of numeric
-        weight values, or a (weights, validity) tuple, corresponding row-wise
-        to any cube.dims.
+        If `return_missing_as` is NaN (the default), the `reduce` method will
+        return a single numeric NumPy array of counts. Any NaN values in it
+        indicate missing cells (an output cell that had no inputs, or a NaN
+        weight value, and therefore no count). If `return_missing_as` is a 2-tuple,
+        like (0, False), the `reduce` method will return a NumPy array of counts,
+        and a second "validity" NumPy array of booleans. Missing values will have
+        0 in the former and False in the latter.
         """
         return self.calculate(
-            [xfuncs.xfunc_valid_count(arr, weights, ignore_missing, return_validity)]
+            [xfuncs.xfunc_valid_count(arr, weights, ignore_missing, return_missing_as)]
         )[0]
 
-    def sum(self, arr, weights=None, ignore_missing=False, return_validity=False):
+    def sum(
+        self, arr, weights=None, ignore_missing=False, return_missing_as=xfuncs.NaN
+    ):
         """Return the sums of an array contingent on self.dims.
 
         The `arr` arg must be a NumPy array of numeric values to be summed,
         or a tuple of (values, validity) arrays, corresponding row-wise
         to any cube.dims.
 
+        If `weights` is given and not None, it must be a NumPy array of numeric
+        weight values, or a (weights, validity) tuple, corresponding row-wise
+        to any cube.dims.
+
         If `ignore_missing` is False (the default), then any missing values
         are propagated so that outputs also have a missing value in any cell
         that had a missing value in one of the rows in the fact variable
@@ -284,28 +290,29 @@ class xcube:
         such input rows are ignored and do not contribute to the output,
         much like NumPy's `nansum` or R's `na.rm = TRUE'.
 
-        If `return_validity` is False (the default), the `reduce` method will
-        return a single numeric NumPy array of sums. Any NaN values in it indicate
-        missings: an output cell that had no inputs, or a missing weight value,
-        and therefore no sum. If True, the `reduce` method will return a NumPy
-        array of sums, and a second "validity" NumPy array of booleans.
-        Missing values (an output cell that had no inputs, or a missing
-        weight value, and therefore no sum) will have 0.0 in the former
-        and True in the latter.
-
-        If `weights` is given and not None, it must be a NumPy array of numeric
-        weight values, or a (weights, validity) tuple, corresponding row-wise
-        to any cube.dims.
+        If `return_missing_as` is NaN (the default), the `reduce` method will
+        return a single numeric NumPy array of sums. Any NaN values in it
+        indicate missing cells (an output cell that had no inputs, or a NaN
+        weight value, and therefore no sum). If `return_missing_as` is a 2-tuple,
+        like (0, False), the `reduce` method will return a NumPy array of sums,
+        and a second "validity" NumPy array of booleans. Missing values will have
+        0 in the former and False in the latter.
         """
         return self.calculate(
-            [xfuncs.xfunc_sum(arr, weights, ignore_missing, return_validity)]
+            [xfuncs.xfunc_sum(arr, weights, ignore_missing, return_missing_as)]
         )[0]
 
-    def mean(self, arr, weights=None, ignore_missing=False, return_validity=False):
+    def mean(
+        self, arr, weights=None, ignore_missing=False, return_missing_as=xfuncs.NaN
+    ):
         """Return the means of an array contingent on self.dims.
 
         The `arr` arg must be a NumPy array of numeric values to be meaned,
         or a tuple of (values, validity) arrays, corresponding row-wise
+        to any cube.dims.
+
+        If `weights` is given and not None, it must be a NumPy array of numeric
+        weight values, or a (weights, validity) tuple, corresponding row-wise
         to any cube.dims.
 
         If `ignore_missing` is False (the default), then any missing values
@@ -315,19 +322,64 @@ class xcube:
         such input rows are ignored and do not contribute to the output,
         much like NumPy's `nanmean` or R's `na.rm = TRUE'.
 
-        If `return_validity` is False (the default), the `reduce` method will
-        return a single numeric NumPy array of means. Any NaN values in it indicate
-        missings: an output cell that had no inputs, or a missing weight value,
-        and therefore no mean. If True, the `reduce` method will return a NumPy
-        array of means, and a second "validity" NumPy array of booleans.
-        Missing values (an output cell that had no inputs, or a missing
-        weight value, and therefore no mean) will have 0.0 in the former
-        and True in the latter.
-
-        If `weights` is given and not None, it must be a NumPy array of numeric
-        weight values, or a (weights, validity) tuple, corresponding row-wise
-        to any cube.dims.
+        If `return_missing_as` is NaN (the default), the `reduce` method will
+        return a single numeric NumPy array of means. Any NaN values in it
+        indicate missing cells (an output cell that had no inputs, or a NaN
+        weight value, and therefore no mean). If `return_missing_as` is a 2-tuple,
+        like (0, False), the `reduce` method will return a NumPy array of means,
+        and a second "validity" NumPy array of booleans. Missing values will have
+        0 in the former and False in the latter.
         """
         return self.calculate(
-            [xfuncs.xfunc_mean(arr, weights, ignore_missing, return_validity)]
+            [xfuncs.xfunc_mean(arr, weights, ignore_missing, return_missing_as)]
+        )[0]
+
+    def max(self, arr, ignore_missing=False, return_missing_as=xfuncs.NaN):
+        """Return the maximums of an array contingent on self.dims.
+
+        The `arr` arg must be a NumPy array of values, or a tuple of
+        (values, validity) arrays, corresponding row-wise to any cube.dims.
+
+        If `ignore_missing` is False (the default), then any missing values
+        are propagated so that outputs also have a missing value in any cell
+        that had a missing value in one of the rows in the fact variable
+        or weight that contributed to that cell. If `ignore_missing` is True,
+        such input rows are ignored and do not contribute to the output,
+        much like NumPy's `nanmean` or R's `na.rm = TRUE'.
+
+        If `return_missing_as` is NaN (the default), the `reduce` method will
+        return a single numeric NumPy array of maximums. Any NaN values in it
+        indicate missing cells (an output cell that had no inputs, and
+        therefore no max). If `return_missing_as` is a 2-tuple, like (0, False),
+        the `reduce` method will return a NumPy array of maximums, and a second
+        "validity" NumPy array of booleans. Missing values will have 0 in the
+        former and False in the latter.
+        """
+        return self.calculate(
+            [xfuncs.xfunc_max(arr, ignore_missing, return_missing_as)]
+        )[0]
+
+    def min(self, arr, ignore_missing=False, return_missing_as=xfuncs.NaN):
+        """Return the minimums of an array contingent on self.dims.
+
+        The `arr` arg must be a NumPy array of values, or a tuple of
+        (values, validity) arrays, corresponding row-wise to any cube.dims.
+
+        If `ignore_missing` is False (the default), then any missing values
+        are propagated so that outputs also have a missing value in any cell
+        that had a missing value in one of the rows in the fact variable
+        or weight that contributed to that cell. If `ignore_missing` is True,
+        such input rows are ignored and do not contribute to the output,
+        much like NumPy's `nanmean` or R's `na.rm = TRUE'.
+
+        If `return_missing_as` is NaN (the default), the `reduce` method will
+        return a single numeric NumPy array of minimums. Any NaN values in it
+        indicate missing cells (an output cell that had no inputs, and
+        therefore no min). If `return_missing_as` is a 2-tuple, like (0, False),
+        the `reduce` method will return a NumPy array of minimums, and a second
+        "validity" NumPy array of booleans. Missing values will have 0 in the
+        former and False in the latter.
+        """
+        return self.calculate(
+            [xfuncs.xfunc_min(arr, ignore_missing, return_missing_as)]
         )[0]

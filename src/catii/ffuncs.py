@@ -44,14 +44,16 @@ to the output, much like NumPy's `nanmean` or R's `na.rm = TRUE`. Note this
 is also faster and uses less memory.
 
 The `reduce` methods herein all default to the "single NumPy array" format,
-with NaN values indicating missingness. Pass `return_validity=True` to obtain
-the 2-tuple of (values, validity) arrays instead. Most functions here will
-replace NaN values in the `values` array with 0 in that case. If you prefer,
-therefore, `sum([])` to return 0, you can choose this option and simply
-throw away the `validity` response.
+with NaN values indicating missingness. Pass e.g. `return_missing_as=(0, False)`
+to return a 2-tuple of (values, validity) arrays instead. Functions here will
+replace NaN values in the `values` array with 0 in that case. If you prefer
+`sum([])` to return 0, for example, without a second "validity" array,
+pass `return_missing_as=0`.
 """
 
 import numpy
+
+NaN = float("nan")
 
 
 def as_separate_validity(arr):
@@ -141,21 +143,21 @@ class ffunc:
 class ffunc_count(ffunc):
     """Calculate the count of a cube.
 
-    If `return_validity` is False (the default), the `reduce` method will
-    return a single numeric NumPy array of counts. Any NaN values in it indicate
-    missings: an output cell that had no inputs, or a NaN weight value,
-    and therefore no count. If True, the `reduce` method will return a NumPy
-    array of counts, and a second "validity" NumPy array of booleans.
-    Missing values (an output cell that had no inputs, or a NaN weight value,
-    and therefore no count) will have 0.0 in the former and True in the latter.
-
     If `weights` is given and not None, it must be a NumPy array of numeric
     weight values, or a (weights, validity) tuple, corresponding row-wise
     to any cube.dims.
+
+    If `return_missing_as` is NaN (the default), the `reduce` method will
+    return a single numeric NumPy array of counts. Any NaN values in it
+    indicate missing cells (an output cell that had no inputs, or a NaN
+    weight value, and therefore no count). If `return_missing_as` is a 2-tuple,
+    like (0, False), the `reduce` method will return a NumPy array of counts,
+    and a second "validity" NumPy array of booleans. Missing values will have
+    0 in the former and False in the latter.
     """
 
     def __init__(
-        self, weights=None, N=None, ignore_missing=False, return_validity=False
+        self, weights=None, N=None, ignore_missing=False, return_missing_as=NaN
     ):
         if weights is None:
             validity = None
@@ -167,7 +169,11 @@ class ffunc_count(ffunc):
         self.validity = validity
         self.weights = weights
         self.ignore_missing = ignore_missing
-        self.return_validity = return_validity
+        self.return_missing_as = return_missing_as
+        if isinstance(self.return_missing_as, tuple):
+            self.null = self.return_missing_as[0]
+        else:
+            self.null = self.return_missing_as
         self.N = N
 
     def get_initial_regions(self, cube):
@@ -184,7 +190,7 @@ class ffunc_count(ffunc):
             )
 
         if self.weights is None:
-            dtype = int
+            dtype = float if numpy.isnan(self.null) else int
             corner_value = N
         else:
             dtype = float
@@ -256,10 +262,11 @@ class ffunc_count(ffunc):
 
             cube._compute_common_cells_from_marginal_diffs(counts)
             counts = counts[cube.marginless]
-            counts = self.adjust_zeros(counts, new=0)
+            missings = numpy.isclose(counts, 0)
+            counts = self.adjust_zeros(counts, new=self.null, condition=missings)
 
-            if self.return_validity:
-                return counts, numpy.ones(counts.shape, dtype=bool)
+            if isinstance(self.return_missing_as, tuple):
+                return counts, ~missings
             else:
                 return counts
         else:
@@ -271,22 +278,17 @@ class ffunc_count(ffunc):
             cube._compute_common_cells_from_marginal_diffs(counts)
             counts = counts[cube.marginless]
 
-            new = 0 if self.return_validity else "nan"
             if self.ignore_missing:
                 cube._compute_common_cells_from_marginal_diffs(valid_counts)
                 valid_counts = valid_counts[cube.marginless]
-                counts = self.adjust_zeros(counts, new, condition=valid_counts == 0)
+                validity = valid_counts != 0
             else:
                 cube._compute_common_cells_from_marginal_diffs(missing_counts)
                 missing_counts = missing_counts[cube.marginless]
-                counts = self.adjust_zeros(counts, new, condition=missing_counts != 0)
+                validity = missing_counts == 0
+            counts[~validity] = self.null
 
-            if self.return_validity:
-                counts = numpy.nan_to_num(counts, copy=False)
-                if self.ignore_missing:
-                    validity = valid_counts != 0
-                else:
-                    validity = missing_counts == 0
+            if isinstance(self.return_missing_as, tuple):
                 return counts, validity
             else:
                 return counts
@@ -299,20 +301,20 @@ class ffunc_valid_count(ffunc):
     or a tuple of (values, validity) arrays, corresponding row-wise
     to any cube.dims.
 
-    If `return_validity` is False (the default), the `reduce` method will
-    return a single numeric NumPy array of counts. Any NaN values in it indicate
-    missings: an output cell that had no inputs, or a NaN weight value,
-    and therefore no count. If True, the `reduce` method will return a NumPy
-    array of counts, and a second "validity" NumPy array of booleans.
-    Missing values (an output cell that had no inputs, or a NaN weight value,
-    and therefore no count) will have 0.0 in the former and True in the latter.
-
     If `weights` is given and not None, it must be a NumPy array of numeric
     weight values, or a (weights, validity) tuple, corresponding row-wise
     to any cube.dims.
+
+    If `return_missing_as` is NaN (the default), the `reduce` method will
+    return a single numeric NumPy array of counts. Any NaN values in it
+    indicate missing cells (an output cell that had no inputs, or a NaN
+    weight value, and therefore no count). If `return_missing_as` is a 2-tuple,
+    like (0, False), the `reduce` method will return a NumPy array of counts,
+    and a second "validity" NumPy array of booleans. Missing values will have
+    0 in the former and False in the latter.
     """
 
-    def __init__(self, arr, weights=None, ignore_missing=False, return_validity=False):
+    def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
         _, validity = as_separate_validity(arr)
 
         if weights is None:
@@ -328,11 +330,15 @@ class ffunc_valid_count(ffunc):
         self.validity = validity
         self.weights = weights
         self.ignore_missing = ignore_missing
-        self.return_validity = return_validity
+        self.return_missing_as = return_missing_as
+        if isinstance(self.return_missing_as, tuple):
+            self.null = self.return_missing_as[0]
+        else:
+            self.null = self.return_missing_as
 
     def get_initial_regions(self, cube):
         """Return NumPy arrays to fill, empty except for corner values."""
-        dtype = int if self.weights is None else float
+        dtype = int if self.weights is None and not numpy.isnan(self.null) else float
 
         # countables may itself be an N-dimensional numeric array
         shape = cube.working_shape + self.countables.shape[1:]
@@ -385,18 +391,16 @@ class ffunc_valid_count(ffunc):
         cube._compute_common_cells_from_marginal_diffs(counts)
         counts = counts[cube.marginless]
 
-        new = 0 if self.return_validity else "nan"
         if self.ignore_missing:
             cube._compute_common_cells_from_marginal_diffs(valid_counts)
             valid_counts = valid_counts[cube.marginless]
-            counts = self.adjust_zeros(counts, new, condition=valid_counts == 0)
+            counts = self.adjust_zeros(counts, self.null, condition=valid_counts == 0)
         else:
             cube._compute_common_cells_from_marginal_diffs(missing_counts)
             missing_counts = missing_counts[cube.marginless]
-            counts = self.adjust_zeros(counts, new, condition=missing_counts != 0)
+            counts = self.adjust_zeros(counts, self.null, condition=missing_counts != 0)
 
-        if self.return_validity:
-            counts = numpy.nan_to_num(counts, copy=False)
+        if isinstance(self.return_missing_as, tuple):
             if self.ignore_missing:
                 validity = valid_counts != 0
             else:
@@ -413,20 +417,20 @@ class ffunc_sum(ffunc):
     or a tuple of (values, validity) arrays, corresponding row-wise
     to any cube.dims.
 
-    If `return_validity` is False (the default), the `reduce` method will
-    return a single numeric NumPy array of sums. Any NaN values in it indicate
-    missings: an output cell that had no inputs, or a NaN weight value,
-    and therefore no sum. If True, the `reduce` method will return a NumPy
-    array of sums, and a second "validity" NumPy array of booleans.
-    Missing values (an output cell that had no inputs, or a NaN weight value,
-    and therefore no sum) will have 0.0 in the former and True in the latter.
-
     If `weights` is given and not None, it must be a NumPy array of numeric
     weight values, or a (weights, validity) tuple, corresponding row-wise
     to any cube.dims.
+
+    If `return_missing_as` is NaN (the default), the `reduce` method will
+    return a single numeric NumPy array of sums. Any NaN values in it
+    indicate missing cells (an output cell that had no inputs, or a NaN
+    weight value, and therefore no sum). If `return_missing_as` is a 2-tuple,
+    like (0, False), the `reduce` method will return a NumPy array of sums,
+    and a second "validity" NumPy array of booleans. Missing values will have
+    0 in the former and False in the latter.
     """
 
-    def __init__(self, arr, weights=None, ignore_missing=False, return_validity=False):
+    def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
         summables, validity = as_separate_validity(arr)
 
         if weights is None:
@@ -442,7 +446,11 @@ class ffunc_sum(ffunc):
         self.validity = validity
         self.weights = weights
         self.ignore_missing = ignore_missing
-        self.return_validity = return_validity
+        self.return_missing_as = return_missing_as
+        if isinstance(self.return_missing_as, tuple):
+            self.null = self.return_missing_as[0]
+        else:
+            self.null = self.return_missing_as
 
     def get_initial_regions(self, cube):
         """Return NumPy arrays to fill, empty except for corner values."""
@@ -499,18 +507,16 @@ class ffunc_sum(ffunc):
         cube._compute_common_cells_from_marginal_diffs(sums)
         sums = sums[cube.marginless]
 
-        new = 0 if self.return_validity else "nan"
         if self.ignore_missing:
             cube._compute_common_cells_from_marginal_diffs(valid_counts)
             valid_counts = valid_counts[cube.marginless]
-            sums = self.adjust_zeros(sums, new, condition=valid_counts == 0)
+            sums = self.adjust_zeros(sums, self.null, condition=valid_counts == 0)
         else:
             cube._compute_common_cells_from_marginal_diffs(missing_counts)
             missing_counts = missing_counts[cube.marginless]
-            sums = self.adjust_zeros(sums, new, condition=missing_counts != 0)
+            sums = self.adjust_zeros(sums, self.null, condition=missing_counts != 0)
 
-        if self.return_validity:
-            sums = numpy.nan_to_num(sums, copy=False)
+        if isinstance(self.return_missing_as, tuple):
             if self.ignore_missing:
                 validity = valid_counts != 0
             else:
@@ -527,20 +533,20 @@ class ffunc_mean(ffunc):
     or a tuple of (values, validity) arrays, corresponding row-wise
     to any cube.dims.
 
-    If `return_validity` is False (the default), the `reduce` method will
-    return a single numeric NumPy array of means. Any NaN values in it indicate
-    missings: an output cell that had no inputs, or a NaN weight value,
-    and therefore no mean. If True, the `reduce` method will return a NumPy
-    array of means, and a second "validity" NumPy array of booleans.
-    Missing values (an output cell that had no inputs, or a NaN weight value,
-    and therefore no mean) will have 0.0 in the former and True in the latter.
-
     If `weights` is given and not None, it must be a NumPy array of numeric
     weight values, or a (weights, validity) tuple, corresponding row-wise
     to any cube.dims.
+
+    If `return_missing_as` is NaN (the default), the `reduce` method will
+    return a single numeric NumPy array of means. Any NaN values in it
+    indicate missing cells (an output cell that had no inputs, or a NaN
+    weight value, and therefore no mean). If `return_missing_as` is a 2-tuple,
+    like (0, False), the `reduce` method will return a NumPy array of means,
+    and a second "validity" NumPy array of booleans. Missing values will have
+    0 in the former and False in the latter.
     """
 
-    def __init__(self, arr, weights=None, ignore_missing=False, return_validity=False):
+    def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
         summables, validity = as_separate_validity(arr)
 
         if weights is None:
@@ -560,7 +566,11 @@ class ffunc_mean(ffunc):
         self.countables = countables
         self.weights = weights
         self.ignore_missing = ignore_missing
-        self.return_validity = return_validity
+        self.return_missing_as = return_missing_as
+        if isinstance(self.return_missing_as, tuple):
+            self.null = self.return_missing_as[0]
+        else:
+            self.null = self.return_missing_as
 
     def get_initial_regions(self, cube):
         """Return NumPy arrays to fill, empty except for corner values."""
@@ -625,9 +635,7 @@ class ffunc_mean(ffunc):
         valid_counts = valid_counts[cube.marginless]
         valid_counts = self.adjust_zeros(valid_counts, new=0)
 
-        sums = self.adjust_zeros(
-            sums, new=0 if self.return_validity else "nan", condition=valid_counts == 0
-        )
+        sums = self.adjust_zeros(sums, self.null, condition=valid_counts == 0)
 
         with numpy.errstate(divide="ignore", invalid="ignore"):
             means = sums / valid_counts
@@ -636,12 +644,11 @@ class ffunc_mean(ffunc):
             cube._compute_common_cells_from_marginal_diffs(missing_counts)
             missing_counts = missing_counts[cube.marginless]
             if means.shape:
-                means[missing_counts.nonzero()] = float("nan")
+                means[missing_counts.nonzero()] = self.null
             elif missing_counts != 0:
-                means = means.dtype.type(float("nan"))
+                means = means.dtype.type(self.null)
 
-        if self.return_validity:
-            means = numpy.nan_to_num(means, copy=False)
+        if isinstance(self.return_missing_as, tuple):
             if self.ignore_missing:
                 validity = valid_counts != 0
             else:
