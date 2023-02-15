@@ -4,28 +4,29 @@ import operator
 from contextlib import closing
 from functools import reduce
 
-from . import ffuncs
-from .set_operations import set_intersect_merge_np
+import numpy
+
+from . import xfuncs
 
 BIG_REGIONS = 1 << 30  # 1G, max input data size before we use threads <shrug>
 
 
-class ccube:
-    """An N-dimensional contingency cube of catii iindexes.
+class xcube:
+    """An N-dimensional contingency cube of NumPy arrays.
 
-    This object defines a list of `dims`: iindex variables being crosstabbed.
+    This object defines a list of `dims`: arrays being crosstabbed.
     It also defines the .shape of the working and output arrays, and some
     slice objects to help navigate them.
 
-    The ccube itself does not own the output; instead, use ffunc objects
-    (or the shortcut methods on the ccube, like `count`) to calculate the
-    aggregate data of a ccube. Multiple ffuncs may apply to a single ccube.
+    The xcube itself does not own the output; instead, use xfunc objects
+    (or the shortcut methods on the xcube, like `count`) to calculate the
+    aggregate data of an xcube. Multiple xfuncs may apply to a single xcube.
 
-    The core operation on a ccube is interaction; that is, the grouping
+    The core operation on an xcube is interaction; that is, the grouping
     of rows by the combinations of distinct categorical dimensions. To work
     with higher dimensions, we iterate over the Cartesian product of them,
-    take 1-D slices of each iindex, form a subcube for each, and stack those.
-    To save time, we initialize "one big region" for each ffunc, representing
+    take 1-D slices of each dim, form a subcube for each, and stack those.
+    To save time, we initialize "one big region" for each xfunc, representing
     the stacked output, then, after filling one subregion per subcube, do a
     single reduce operation on the stacked cube to perform all of the marginal
     differencing in one pass.
@@ -35,174 +36,75 @@ class ccube:
     debug = False
 
     def __init__(self, dims, interacting_shape=None):
-        self.dims = dims
+        self.dims = [numpy.asarray(d) for d in dims]
 
-        self.scaffold_shape = tuple(e for d in dims for e in d.shape[1:])
+        self.scaffold_shape = tuple(e for d in self.dims for e in d.shape[1:])
         self.num_regions = reduce(operator.mul, self.scaffold_shape, 1)
         self.parallel = (
             self.num_regions > 2
             and (self.dims[0].shape[0] * self.num_regions) >= BIG_REGIONS
         )
         if interacting_shape is None:
-            interacting_shape = tuple(max(coords[0] for coords in d) + 1 for d in dims)
+            # Slow! Always pass interacting_shape if you already know extents.
+            interacting_shape = tuple(max(d.flat) + 1 for d in self.dims)
         self.interacting_shape = interacting_shape
         self.shape = self.scaffold_shape + self.interacting_shape
-        self.working_shape = self.scaffold_shape + tuple(
-            e + 1 for e in self.interacting_shape
-        )
+        self._set_strides()
 
-        self.scaffold = tuple(slice(None) for s in self.scaffold_shape)
-        self.corner = self.scaffold + tuple(-1 for d in dims)
-        self.marginless = self.scaffold + tuple(slice(0, -1) for dim in dims)
+    def _set_strides(self):
+        """Set self.multipliers/mintype.
 
-        self.intersection_data_points = 0
+        When calculating the interaction of multiple categorical dimensions,
+        a shortcut is to multiply each one by the cumulative product of all
+        the earlier ones, in effect pre-calculating the "stride" that dimension
+        will take in the output arrays. For example, one dim of extent 2 and
+        another of extent 3 will form a cube of shape (2, 3):
+
+               dim 2
+             __0___1__
+        d  0 |_0_|_1_|
+        i  1 |_2_|_3_|
+        m  2 |_4_|_5_|
+        1
+
+        If we number the cells as if they were flattened/unraveled, they would
+        be from 0-5, and we see that each cell number is (dim1 * 2) + dim2.
+        We say dim1 has a "stride" or multiplier of 2. The method calculates
+        self.multipliers. When we fill the cube, we multiply the category ids
+        (contiguous integers starting from 0) by their stride.
+
+        This also calculates the dtype needed to faithfully address the largest
+        cell number as self.mintype.
+        """
+        multipliers = numpy.cumprod(list(reversed(self.interacting_shape)))
+        self.multipliers = numpy.append(numpy.flip(multipliers)[1:], [1])
+
+        # Coordinates might be of several dtypes: int8, int16 (even bool!).
+        # If the cumulative product of shape exceeds the dtype
+        # of any coords, we need to bump it up to at least that size
+        # before doing additions and multiplications which might overflow.
+        # In fact, if any coords.dtype is of a higher width than a
+        # previous one, addition might fail with "Cannot cast" errors
+        # from NumPy. Rather than supply casting rules to numpy.add
+        # (which might hide real problems), we instead cast all coords
+        # to the same type.
+        maxmult = multipliers[-1] if len(multipliers) else 1
+        for mintype in [numpy.uint8, numpy.uint16, numpy.uint32]:
+            maxint = numpy.iinfo(mintype).max
+            if maxmult <= maxint:
+                break
+        else:
+            raise TypeError("Cannot calculate cubes with more than %s cells." % maxint)
+        self.mintype = mintype
 
     # ----------------------------- interaction ----------------------------- #
 
-    def _walk(self, dims, base_coords, base_set, func):
-        # This method could be made smaller by moving the `if's` inside
-        # the loops, but that actually becomes a performance issue when
-        # you're looping over tens of thousands of subvariables.
-        # Exploded like this can reduce completion time by 10%.
-        remaining_dims = dims[1:]
-        if remaining_dims:
-            if base_set is None:
-                # First dim, or the case where all higher dims have passed
-                # ((-1,), None) to mean "ignore this dim".
-                for coords, rowids in dims[0].items():
-                    self._walk(remaining_dims, base_coords + coords, rowids, func)
-            else:
-                for coords, rowids in dims[0].items():
-                    self.intersection_data_points += len(base_set) + len(rowids)
-                    rowids = set_intersect_merge_np(base_set, rowids)
-                    if rowids.shape[0]:
-                        self._walk(remaining_dims, base_coords + coords, rowids, func)
-
-            # Margin
-            self._walk(remaining_dims, base_coords + (-1,), base_set, func)
-        elif dims:
-            # Last dim. The `rowids` in each loop below are the rowids
-            # that appear in all dims for this particular tuple of new_coords.
-            # Any coordinate which is -1 targets the margin for that axis.
-            if base_set is None:
-                for coords, rowids in dims[0].items():
-                    if rowids.shape[0]:
-                        func(base_coords + coords, rowids)
-            else:
-                for coords, rowids in dims[0].items():
-                    self.intersection_data_points += len(base_set) + len(rowids)
-                    rowids = set_intersect_merge_np(base_set, rowids)
-                    if rowids.shape[0]:
-                        func(base_coords + coords, rowids)
-
-                # Margin
-                if base_set.shape[0]:
-                    func(base_coords + (-1,), base_set)
-
-    def walk(self, func):
-        """Call func(interaction-of-coords, intersection-of-rowids) over self.dims.
-
-        This recursively iterates over each dim in self, combining coordinates
-        from each along the way. For each distinct combination, we find the
-        set of rowids which contain those coordinates--if there are any,
-        we yield the combined coordinates and the rowids.
-
-        COMMON VALUES ARE NOT INCLUDED. Instead, yielded coordinates
-        with -1 values signify a marginal cell on that axis;
-        the corresponding rowids are the set-intersection of all rowids
-        in the other dimensions for the distinct coords without regard
-        for their coordinate on those -1 axes. For example, if we yield:
-
-            (3, -1, 2, -1): [4, 5, 9, 130]
-
-        ...that means there are four rows in the input frame which have
-        category 3 for dims[0] and category 2 for dims[2], regardless of
-        what their categories are for dims 1 and 3. There are, therefore,
-        four rows at (3, -1, 2, -1), where -1 is the margin along that axis.
-        A simple count might then place a `4` in that cell in the cube;
-        other ffuncs might use those rowids to look up other outputs.
-        """
-        self._walk(self.dims, (), None, func)
-
-    def interactions(self):
-        """Return (interaction-of-coords, intersection-of-rowids) pairs from self."""
-        out = []
-        self.walk(lambda c, r: out.append((c, r)))
-        return out
-
-    def _compute_common_cells_from_marginal_diffs(self, region):
-        """Fill common cells by performing a "marginal diff" along each axis."""
-        # That is, we subtract ccube.sum(axis=M) from each margin M.
-        # Some of these will be computed multiple times if there are multiple
-        # dimensions, but that's ok.
-        #
-        # For example, if we do a simple count of (X, Y) with the following data:
-        #
-        #   var X  var Y
-        #       0      1 (respondent A)
-        #       1      0 (respondent B)
-        #
-        # ...where 0 is the common value in each, then ccube.interactions will
-        # form a 2x2 cube, plus an extra marginal row for the X axis (0)
-        # and an extra marginal column for the Y axis (1):
-        #
-        #     [0,  0,    0],
-        #     [0,  0,    1],
-        #
-        #     [0,  1,    2],
-        #
-        # It is a bit easier to show what's happening if we replace those
-        # zeros with underscores, and the number 1's with the letter
-        # of the respondent they represent:
-        #
-        #     [_,  _,    _],
-        #     [_,  _,    b],
-        #
-        #     [_,  a,   ab],
-        #
-        # We expect the result to be (after cutting off the margins):
-        #
-        #     [_,  A],
-        #     [B,  _],
-        #
-        # ...so, in effect, we need to "raise" the marginal "a" to its final
-        # place "A" in the common row, and similarly for marginal "b"/common "B".
-        #
-        # If we start with axis 0, we "raise a to A" by a marginal diff:
-        #
-        #   `region[0] = region[-1, :] - region[:-1, :].sum(axis=0)`
-        #
-        # ...and we get:
-        #
-        #     [_,  A,   a],
-        #     [_,  _,   b],
-        #     [_,  a,  ab],
-        #
-        # Diffing that along axis 1, we get:
-        #
-        #     [_,  A,   a],
-        #     [B,  _,   b],
-        #     [b,  a,  ab],
-        #
-        # For data points whose coordinates include more than one common value,
-        # we have to do a marginal diff of one axis, including the margin cells,
-        # and then diff that along the next axis.
-        axes = list(range(len(self.dims)))
-        for axis in axes:
-            common_slice = self.scaffold + tuple(
-                dim.common if a == axis else slice(None)
-                for a, dim in enumerate(self.dims)
-            )
-            margin_slice = self.scaffold + tuple(
-                -1 if a == axis else slice(None) for a in axes
-            )
-            uncommon_slice = self.scaffold + tuple(
-                slice(None, -1) if a == axis else slice(None) for a in axes
-            )
-            sumaxis = len(self.scaffold) + axis
-            region[common_slice] = region[margin_slice] - region[uncommon_slice].sum(
-                axis=sumaxis
-            )
+    def strided_dims(self):
+        """Return self.dims, multiplied by their stride for interacting."""
+        return [
+            dim.astype(self.mintype) if m == 1 else dim.astype(self.mintype) * m
+            for m, dim in zip(self.multipliers, self.dims)
+        ]
 
     # ------------------------------- stacking ------------------------------- #
 
@@ -212,8 +114,8 @@ class ccube:
 
         This returns an iterable of slice coordinates: each one a distinct
         combination describing 1-D slices from each dimension. For example,
-        if our dimensions are a 2-D iindex 'A' with 3 columns, then a 1-D
-        iindex 'B', then a 3-D iindex 'C' with 2 columns and an additional
+        if our dimensions are a 2-D array 'A' with 3 columns, then a 1-D
+        array 'B', then a 3-D array 'C' with 2 columns and an additional
         axis of length 4, then this would generate:
 
             (  # A     B     C
@@ -229,11 +131,11 @@ class ccube:
                 ((2,), None, (1, 4)),
             )
 
-        We can then calculate aggregates for each ccube and fill them.
+        We can then calculate aggregates for each xcube and fill them.
         If a dimension is already 1-D, like `B` in the above example,
-        None is inserted. Multiple multidimensional iindexes multiply
-        the number of ccubes. Indexes with more than one higher dimension
-        (like `C` in the above example) similarly multiply the number of ccubes.
+        None is inserted. Multiple multidimensional dims multiply
+        the number of xcubes. Arrays with more than one higher dimension
+        (like `C` in the above example) similarly multiply the number of xcubes.
 
         You may transpose the output afterward to match the desired order
         of dimensions.
@@ -248,27 +150,28 @@ class ccube:
 
         return itertools.product(*extents)
 
-    def subcube(self, nested_coords):
-        return ccube(
-            [
-                dim if coords is None else dim.sliced(*coords)
-                for coords, dim in zip(nested_coords, self.dims)
-            ],
-            interacting_shape=self.interacting_shape,
-        )
-
     def calculate(self, funcs):
-        """Return a tuple of aggregates, usually one NumPy array for each ffunc."""
+        """Return a tuple of aggregates, usually one NumPy array for each xfunc."""
         if self.debug:
-            print("\nccube.calculate(%s):" % (funcs,))
+            print("\nxcube.calculate(%s):" % (funcs,))
         results = [func.get_initial_regions(self) for func in funcs]
         if self.debug:
             print("INITIAL REGIONS:")
             for func, regions in zip(funcs, results):
                 print(func, ":", regions)
 
+        strided_dims = self.strided_dims()
+
         def fill_one_cube(nested_coords):
-            subcube = self.subcube(nested_coords)
+            slices1d = [
+                strided_dim if coords is None else strided_dim[(slice(None),) + coords]
+                for coords, strided_dim in zip(nested_coords, strided_dims)
+            ]
+
+            # Obtain compound coordinates by simply adding across: the values have
+            # already been multiplied by the proper stride.
+            coordinates = reduce(operator.add, slices1d) if slices1d else None
+
             if self.debug:
                 print("FILL SUBCUBE:", nested_coords)
             for func, regions in zip(funcs, results):
@@ -280,12 +183,11 @@ class ccube:
                     # of the complete result array(s) should be filled in
                     # by aggregating the given 1d slices of input data.
                     # Form a view of this region to pass to each measure,
-                    # so the ffuncs themselves don't have to know about
+                    # so the xfuncs themselves don't have to know about
                     # our outer dimensions.
                     regions = [region[tuple(flattened_slice)] for region in regions]
 
-                func.fill(subcube, regions)
-                self.intersection_data_points += subcube.intersection_data_points
+                func.fill(coordinates, regions)
                 if self.debug:
                     print(func, ":=", regions)
 
@@ -307,7 +209,7 @@ class ccube:
                 print(func, ":", regions)
         return output
 
-    # -------------------------------- ffuncs -------------------------------- #
+    # -------------------------------- xfuncs -------------------------------- #
 
     def count(self, weights=None, N=None, ignore_missing=False, return_validity=False):
         """Return the counts of self.dims.
@@ -332,7 +234,7 @@ class ccube:
         to any cube.dims.
         """
         return self.calculate(
-            [ffuncs.ffunc_count(weights, N, ignore_missing, return_validity)]
+            [xfuncs.xfunc_count(weights, N, ignore_missing, return_validity)]
         )[0]
 
     def valid_count(
@@ -365,7 +267,7 @@ class ccube:
         to any cube.dims.
         """
         return self.calculate(
-            [ffuncs.ffunc_valid_count(arr, weights, ignore_missing, return_validity)]
+            [xfuncs.xfunc_valid_count(arr, weights, ignore_missing, return_validity)]
         )[0]
 
     def sum(self, arr, weights=None, ignore_missing=False, return_validity=False):
@@ -396,7 +298,7 @@ class ccube:
         to any cube.dims.
         """
         return self.calculate(
-            [ffuncs.ffunc_sum(arr, weights, ignore_missing, return_validity)]
+            [xfuncs.xfunc_sum(arr, weights, ignore_missing, return_validity)]
         )[0]
 
     def mean(self, arr, weights=None, ignore_missing=False, return_validity=False):
@@ -427,5 +329,5 @@ class ccube:
         to any cube.dims.
         """
         return self.calculate(
-            [ffuncs.ffunc_mean(arr, weights, ignore_missing, return_validity)]
+            [xfuncs.xfunc_mean(arr, weights, ignore_missing, return_validity)]
         )[0]

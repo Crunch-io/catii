@@ -1,5 +1,4 @@
 import numpy
-import pytest
 
 from catii import ccube, iindex
 from catii.ffuncs import ffunc_count, ffunc_sum
@@ -24,13 +23,6 @@ class TestCubeDimensions:
         idx2 = iindex({(1,): [0, 2, 5]}, 0, (8,))
         cube = ccube([idx1, idx2])
         assert cube.count().tolist() == [[4, 1], [1, 2]]
-
-    def test_cube_0d(self):
-        cube = ccube([])
-        assert cube.valid_count([True, False, True, False, True]).tolist() == 3
-        with pytest.raises(ValueError):
-            cube.count()
-        assert cube.count(N=100).tolist() == 100
 
 
 class TestCubeProduct:
@@ -80,16 +72,10 @@ class TestCubeCalculate:
             [[3, 2], [3, 0]],
         ]
 
-        fsum = ffunc_sum(summables=numpy.arange(8), countables=[True, False] * 4)
-        (counts, (sums,)) = cube.calculate([ffunc_count(), fsum])
+        fsum = ffunc_sum((numpy.arange(8)))
+        counts, sums = cube.calculate([ffunc_count(), fsum])
         assert counts.tolist() == [
             [[4, 1], [1, 2]],
             [[3, 2], [3, 0]],
         ]
-        assert arr_eq(
-            sums,
-            [
-                [[14.0, float("nan")], [float("nan"), 2.0]],
-                [[12.0, 7.0], [9.0, float("nan")]],
-            ],
-        )
+        assert arr_eq(sums, [[[14, 5], [7, 2]], [[12, 7], [9, 0]],],)

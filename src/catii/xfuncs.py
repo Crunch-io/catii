@@ -1,14 +1,14 @@
 """Frequency (and other aggregate) functions for catii.
 
-These take cubes as input and return NumPy arrays as output from their `reduce`
+These take xcubes as input and return NumPy arrays as output from their `reduce`
 methods, In between, they create, fill, and reduce "regions" (NumPy arrays)
 as intermediate workspaces. The number of regions and their dtype depends on the
-function: ffunc_count, for example, uses one region of ints or floats and mostly
-returns it unchanged, while ffunc_mean uses separate "sums" and "valid_counts"
+function: xfunc_count, for example, uses one region of ints or floats and mostly
+returns it unchanged, while xfunc_mean uses separate "sums" and "valid_counts"
 regions as the numerator and denominator, dividing them in its "reduce" method
 to return a single array of means.
 
-Most arguments to ffuncs (including weights) are variables which correspond
+Most arguments to xfuncs (including weights) are variables which correspond
 row-wise with cube dims, and must therefore have the same number of rows.
 All such arguments may take one of two forms:
     * a single NumPy array, where missing values are represented by NaN or NaT
@@ -35,7 +35,7 @@ numpy.sum([]) to 0.0. However, consumers of catii often need to distinguish
 a sum or mean of [0, 0] from one of []. You are, of course, free to take the
 output and set arr[arr.isnan()] = 0 if you desire.
 
-Each ffunc has an optional `ignore_missing` arg. If False (the default), then
+Each xfunc has an optional `ignore_missing` arg. If False (the default), then
 any missing values (values=NaN or validity=False) are propagated so that
 outputs also have a missing value in any cell that had a missing value in
 one of the rows in the fact variable or weight that contributed to that cell.
@@ -57,13 +57,13 @@ import numpy
 def as_separate_validity(arr):
     """Return (values, validity) from the given arr-or-(values, validity)-tuple.
 
-    Most ffuncs take one or more arguments that represent variables with
+    Most xfuncs take one or more arguments that represent variables with
     missingness; callers have a choice whether to send a single numeric array,
     which uses NaN values to represent missing cells, or a 2-tuple of arrays,
     the first with values and the second with booleans (True meaning "valid"
     and False meaning "missing"). This function returns the 2-tuple form
     regardless of which form the caller passed, because that's more useful
-    inside ffunc logic.
+    inside xfunc logic.
     """
     if isinstance(arr, tuple):
         arr, validity = arr
@@ -75,12 +75,29 @@ def as_separate_validity(arr):
     return arr, validity
 
 
-class ffunc:
+class xfunc:
     """A base class for frequency (and other aggregate) functions."""
 
+    shape = None
+    """The shape of any fact variable(s), not including its N; that is,
+    arr.shape[1:], and represents any additional axes the fact variable has.
+    If non-empty, the `reduce` output will typically by extended by these
+    additional axes, as well.
+    """
+
     def get_initial_regions(self, cube):
-        """Return NumPy arrays to fill, empty except for corner values."""
+        """Return empty NumPy arrays to fill."""
         raise NotImplementedError
+
+    def flat_regions(self, regions):
+        """Return the given regions, flattened except for self.shape."""
+        if self.size:
+            return [
+                part.reshape((int(part.size / self.size),) + self.shape)
+                for part in regions
+            ]
+        else:
+            return [part.reshape((part.size,) + self.shape) for part in regions]
 
     def fill(self, cube, regions):
         """Fill the `regions` arrays with distributions contingent on cube.dims.
@@ -92,7 +109,7 @@ class ffunc:
         raise NotImplementedError
 
     def reduce(self, cube, regions):
-        """Return `regions` with common cells calculated and margins removed."""
+        """Return `regions` reduced to proper output."""
         raise NotImplementedError
 
     def calculate(self, cube):
@@ -105,12 +122,7 @@ class ffunc:
     def adjust_zeros(arr, new="nan", condition=None):
         """Set arr[<condition or isclose(arr, 0)>] = new and return it.
 
-        Sometimes, marginal differencing can produce minutely different results
-        (within the machine's floating-point epsilon). For most values, this
-        has little effect, but when the value should be 0 but is just barely
-        not 0, it's easy to end up with e.g. 1e-09/1e-09=1 instead of 0/0=nan.
-
-        Use this to adjust values near zero to "nan" or zero. If `condition`
+        Use this to adjust values to "nan" or zero. If `condition`
         is None (the default), then `arr` values near zero will be adjusted
         to the given `new` value. Otherwise, `condition` must be a NumPy
         array, and rows where it is True will cause the corresponding
@@ -138,7 +150,7 @@ class ffunc:
         return arr
 
 
-class ffunc_count(ffunc):
+class xfunc_count(xfunc):
     """Calculate the count of a cube.
 
     If `return_validity` is False (the default), the `reduce` method will
@@ -165,97 +177,95 @@ class ffunc_count(ffunc):
             weights[~validity] = 0
 
         self.validity = validity
+        self.shape = () if validity is None else validity.shape[1:]
+        self.size = numpy.prod(self.shape, 0)
+
         self.weights = weights
         self.ignore_missing = ignore_missing
         self.return_validity = return_validity
+        if N is None and self.weights is not None and self.weights.shape:
+            N = self.weights.shape[0]
         self.N = N
 
     def get_initial_regions(self, cube):
-        """Return NumPy arrays to fill, empty except for corner values."""
-        if self.N is not None:
-            N = self.N
-        elif cube.dims:
-            N = cube.dims[0].shape[0]
-        elif self.weights and self.weights.shape:
-            N = self.weights.shape[0]
-        else:
-            raise ValueError(
-                "Cannot determine counts with no dimensions, weights, or N."
-            )
+        """Return empty NumPy arrays to fill."""
+        dtype = int if self.weights is None else float
 
-        if self.weights is None:
-            dtype = int
-            corner_value = N
-        else:
-            dtype = float
-            if self.weights.shape:
-                corner_value = self.weights.sum()
-            else:
-                corner_value = self.weights * N
-
-        counts = numpy.zeros(cube.working_shape, dtype=dtype)
-        # Set the "grand total" value in the corner of each region.
-        counts[cube.corner] = corner_value
+        shape = cube.shape
+        if not shape:
+            shape = (1,)
+        counts = numpy.zeros(shape, dtype=dtype)
 
         if self.weights is None:
             return (counts,)
         else:
             if self.ignore_missing:
-                valid_counts = numpy.zeros(cube.working_shape, dtype=int)
-                valid_counts[cube.corner] = numpy.count_nonzero(self.validity, axis=0)
+                valid_counts = numpy.zeros(shape, dtype=int)
                 return counts, valid_counts
             else:
-                missing_counts = numpy.zeros(cube.working_shape, dtype=int)
-                missing_counts[cube.corner] = numpy.count_nonzero(
-                    ~self.validity, axis=0
-                )
+                missing_counts = numpy.zeros(shape, dtype=int)
                 return counts, missing_counts
 
-    def fill(self, cube, regions):
-        """Fill the `regions` arrays with distributions contingent on cube.dims.
+    def fill(self, coordinates, regions):
+        """Fill the `regions` arrays with distributions contingent on coordinates.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
         one which has already been initialized (including any corner values).
         We will compute its common cells from the margins later in self.reduce.
         """
+        # Flatten our regions so flat bincount output can overwrite it in place.
+        regions = self.flat_regions(regions)
+
         if self.weights is None:
             (counts,) = regions
-
-            def _fill(x_coords, x_rowids):
-                counts[x_coords] = len(x_rowids)
-
+            if coordinates is None:
+                # Dimensionless cube
+                if self.N is None:
+                    raise ValueError(
+                        "Cannot determine counts with no dimensions, weights, or N."
+                    )
+                counts[:] = self.N
+            else:
+                counts[:] = numpy.bincount(coordinates, minlength=counts.shape[0])
         else:
             if self.ignore_missing:
                 counts, valid_counts = regions
             else:
                 counts, missing_counts = regions
 
-            def _fill(x_coords, x_rowids):
+            if coordinates is None:
+                # Dimensionless cube
+                if self.N is None:
+                    raise ValueError(
+                        "Cannot determine counts with no dimensions, weights, or N."
+                    )
+                counts[:] = self.weights.sum()
+            else:
+                size = counts.shape[0]
                 if self.weights.shape:
-                    counts[x_coords] = self.weights[x_rowids].sum()
-                    vcount = numpy.count_nonzero(self.validity[x_rowids], axis=0)
+                    counts[:] = numpy.bincount(
+                        coordinates, weights=self.weights, minlength=size
+                    )
                     if self.ignore_missing:
-                        valid_counts[x_coords] = vcount
+                        valid_counts[:] = numpy.bincount(
+                            coordinates, weights=self.validity, minlength=size
+                        )
                     else:
-                        missing_counts[x_coords] = len(x_rowids) - vcount
+                        missing_counts[:] = numpy.bincount(
+                            coordinates, weights=~self.validity, minlength=size
+                        )
                 else:
-                    # Scalar weight. Broadcast.
-                    len_rowids = len(x_rowids)
-                    counts[x_coords] = self.weights * len_rowids
+                    bcounts = numpy.bincount(coordinates, minlength=size)
+                    counts[:] = bcounts * self.weights
                     if self.ignore_missing:
-                        valid_counts[x_coords] = len_rowids if self.validity else 0
+                        valid_counts[:] = bcounts * self.validity
                     else:
-                        missing_counts[x_coords] = 0 if self.validity else len_rowids
-
-        cube.walk(_fill)
+                        missing_counts[:] = bcounts * ~self.validity
 
     def reduce(self, cube, regions):
-        """Return `regions` with common cells calculated and margins removed."""
+        """Return `regions` reduced to proper output."""
         if self.weights is None:
             (counts,) = regions
-
-            cube._compute_common_cells_from_marginal_diffs(counts)
-            counts = counts[cube.marginless]
             counts = self.adjust_zeros(counts, new=0)
 
             if self.return_validity:
@@ -268,17 +278,10 @@ class ffunc_count(ffunc):
             else:
                 counts, missing_counts = regions
 
-            cube._compute_common_cells_from_marginal_diffs(counts)
-            counts = counts[cube.marginless]
-
             new = 0 if self.return_validity else "nan"
             if self.ignore_missing:
-                cube._compute_common_cells_from_marginal_diffs(valid_counts)
-                valid_counts = valid_counts[cube.marginless]
                 counts = self.adjust_zeros(counts, new, condition=valid_counts == 0)
             else:
-                cube._compute_common_cells_from_marginal_diffs(missing_counts)
-                missing_counts = missing_counts[cube.marginless]
                 counts = self.adjust_zeros(counts, new, condition=missing_counts != 0)
 
             if self.return_validity:
@@ -292,7 +295,7 @@ class ffunc_count(ffunc):
                 return counts
 
 
-class ffunc_valid_count(ffunc):
+class xfunc_valid_count(xfunc):
     """Calculate the valid count of an array contingent on a cube.
 
     The `arr` arg must be a NumPy array of numeric values to be counted,
@@ -314,6 +317,8 @@ class ffunc_valid_count(ffunc):
 
     def __init__(self, arr, weights=None, ignore_missing=False, return_validity=False):
         _, validity = as_separate_validity(arr)
+        self.shape = validity.shape[1:]
+        self.size = numpy.prod(self.shape, 0)
 
         if weights is None:
             countables = validity.copy()
@@ -331,68 +336,88 @@ class ffunc_valid_count(ffunc):
         self.return_validity = return_validity
 
     def get_initial_regions(self, cube):
-        """Return NumPy arrays to fill, empty except for corner values."""
+        """Return empty NumPy arrays to fill."""
         dtype = int if self.weights is None else float
 
         # countables may itself be an N-dimensional numeric array
-        shape = cube.working_shape + self.countables.shape[1:]
+        shape = cube.shape + self.countables.shape[1:]
+        if not shape:
+            shape = (1,)
         counts = numpy.zeros(shape, dtype=dtype)
-        counts[cube.corner] = numpy.nansum(self.countables, axis=0)
 
         if self.ignore_missing:
-            valid_counts = numpy.zeros(shape, dtype=dtype)
-            valid_counts[cube.corner] = numpy.count_nonzero(self.validity, axis=0)
+            valid_counts = numpy.zeros(shape, dtype=int)
             return counts, valid_counts
         else:
             missing_counts = numpy.zeros(shape, dtype=int)
-            missing_counts[cube.corner] = numpy.count_nonzero(~self.validity, axis=0)
             return counts, missing_counts
 
-    def fill(self, cube, regions):
-        """Fill the `regions` arrays with distributions contingent on cube.dims.
+    def fill(self, coordinates, regions):
+        """Fill the `regions` arrays with distributions contingent on coordinates.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
         one which has already been initialized (including any corner values).
         We will compute its common cells from the margins later in self.reduce.
         """
+        # Flatten our regions so flat bincount output can overwrite it in place.
+        regions = self.flat_regions(regions)
+
         if self.ignore_missing:
             counts, valid_counts = regions
         else:
             counts, missing_counts = regions
 
-        def _fill(x_coords, x_rowids):
-            # This can be called millions of times, so it's critical
-            # to perform as few passes over the data as possible.
-            # We set countables[~validity] = 0 so there's no need to filter
-            # them out again here.
-            counts[x_coords] = numpy.sum(self.countables[x_rowids], axis=0)
-
-            vcount = numpy.count_nonzero(self.validity[x_rowids], axis=0)
+        # This can be called thousands of times, so it's critical
+        # to perform as few passes over the data as possible.
+        # We set countables[~validity] = 0 so there's
+        # no need to filter them out again here.
+        if coordinates is None:
+            counts[:] = numpy.nansum(self.countables, axis=0)
             if self.ignore_missing:
-                valid_counts[x_coords] = vcount
+                valid_counts[:] = numpy.count_nonzero(self.validity, axis=0)
             else:
-                missing_counts[x_coords] = len(x_rowids) - vcount
-
-        cube.walk(_fill)
+                missing_counts[:] = numpy.count_nonzero(~self.validity, axis=0)
+        else:
+            size = counts.shape[0]
+            if self.countables.ndim == 1:
+                counts[:] = numpy.bincount(
+                    coordinates, weights=self.countables, minlength=size
+                )
+                if self.ignore_missing:
+                    valid_counts[:] = numpy.bincount(
+                        coordinates, weights=self.validity, minlength=size
+                    )
+                else:
+                    missing_counts[:] = numpy.bincount(
+                        coordinates, weights=~self.validity, minlength=size
+                    )
+            elif self.countables.ndim == 2:
+                for i, ss in enumerate(self.countables.T):
+                    counts[:, i] = numpy.bincount(
+                        coordinates, weights=ss, minlength=size
+                    )
+                if self.ignore_missing:
+                    for i, cs in enumerate(self.validity.T):
+                        valid_counts[:, i] = numpy.bincount(
+                            coordinates, weights=cs, minlength=size
+                        )
+                else:
+                    for i, cs in enumerate(~self.validity.T):
+                        missing_counts[:, i] = numpy.bincount(
+                            coordinates, weights=cs, minlength=size
+                        )
 
     def reduce(self, cube, regions):
-        """Return `regions` with common cells calculated and margins removed."""
+        """Return `regions` reduced to proper output."""
         if self.ignore_missing:
             counts, valid_counts = regions
         else:
             counts, missing_counts = regions
-
-        cube._compute_common_cells_from_marginal_diffs(counts)
-        counts = counts[cube.marginless]
 
         new = 0 if self.return_validity else "nan"
         if self.ignore_missing:
-            cube._compute_common_cells_from_marginal_diffs(valid_counts)
-            valid_counts = valid_counts[cube.marginless]
             counts = self.adjust_zeros(counts, new, condition=valid_counts == 0)
         else:
-            cube._compute_common_cells_from_marginal_diffs(missing_counts)
-            missing_counts = missing_counts[cube.marginless]
             counts = self.adjust_zeros(counts, new, condition=missing_counts != 0)
 
         if self.return_validity:
@@ -406,7 +431,7 @@ class ffunc_valid_count(ffunc):
             return counts
 
 
-class ffunc_sum(ffunc):
+class xfunc_sum(xfunc):
     """Calculate the sums of an array contingent on a cube.
 
     The `arr` arg must be a NumPy array of numeric values to be summed,
@@ -428,6 +453,8 @@ class ffunc_sum(ffunc):
 
     def __init__(self, arr, weights=None, ignore_missing=False, return_validity=False):
         summables, validity = as_separate_validity(arr)
+        self.shape = summables.shape[1:]
+        self.size = numpy.prod(self.shape, 0)
 
         if weights is None:
             summables = summables.copy()
@@ -445,68 +472,87 @@ class ffunc_sum(ffunc):
         self.return_validity = return_validity
 
     def get_initial_regions(self, cube):
-        """Return NumPy arrays to fill, empty except for corner values."""
+        """Return empty NumPy arrays to fill."""
         dtype = self.summables.dtype if self.weights is None else float
 
         # summables may itself be an N-dimensional numeric array
-        shape = cube.working_shape + self.summables.shape[1:]
+        shape = cube.shape + self.summables.shape[1:]
+        if not shape:
+            shape = (1,)
         sums = numpy.zeros(shape, dtype=dtype)
-        sums[cube.corner] = numpy.nansum(self.summables, axis=0)
 
         if self.ignore_missing:
-            valid_counts = numpy.zeros(shape, dtype=dtype)
-            valid_counts[cube.corner] = numpy.count_nonzero(self.validity, axis=0)
+            valid_counts = numpy.zeros(shape, dtype=int)
             return sums, valid_counts
         else:
             missing_counts = numpy.zeros(shape, dtype=int)
-            missing_counts[cube.corner] = numpy.count_nonzero(~self.validity, axis=0)
             return sums, missing_counts
 
-    def fill(self, cube, regions):
-        """Fill the `regions` arrays with distributions contingent on cube.dims.
+    def fill(self, coordinates, regions):
+        """Fill the `regions` arrays with distributions contingent on coordinates.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
         one which has already been initialized (including any corner values).
         We will compute its common cells from the margins later in self.reduce.
         """
+        # Flatten our regions so flat bincount output can overwrite it in place.
+        regions = self.flat_regions(regions)
+
         if self.ignore_missing:
             sums, valid_counts = regions
         else:
             sums, missing_counts = regions
 
-        def _fill(x_coords, x_rowids):
-            # This can be called millions of times, so it's critical
-            # to perform as few passes over the data as possible.
-            # We set summables[~validity] = 0 so there's no need to filter
-            # them out again here.
-            sums[x_coords] = numpy.sum(self.summables[x_rowids], axis=0)
+        # This can be called thousands of times, so it's critical
+        # to perform as few passes over the data as possible.
+        # We set summables/countables[~validity] = 0 so there's
+        # no need to filter them out again here.
 
-            vcount = numpy.count_nonzero(self.validity[x_rowids], axis=0)
+        if coordinates is None:
+            sums[:] = numpy.nansum(self.summables, axis=0)
             if self.ignore_missing:
-                valid_counts[x_coords] = vcount
+                valid_counts[:] = numpy.count_nonzero(self.validity, axis=0)
             else:
-                missing_counts[x_coords] = len(x_rowids) - vcount
-
-        cube.walk(_fill)
+                missing_counts[:] = numpy.count_nonzero(~self.validity, axis=0)
+        else:
+            size = sums.shape[0]
+            if self.summables.ndim == 1:
+                sums[:] = numpy.bincount(
+                    coordinates, weights=self.summables, minlength=size
+                )
+                if self.ignore_missing:
+                    valid_counts[:] = numpy.bincount(
+                        coordinates, weights=self.validity, minlength=size
+                    )
+                else:
+                    missing_counts[:] = numpy.bincount(
+                        coordinates, weights=~self.validity, minlength=size
+                    )
+            elif self.summables.ndim == 2:
+                for i, ss in enumerate(self.summables.T):
+                    sums[:, i] = numpy.bincount(coordinates, weights=ss, minlength=size)
+                if self.ignore_missing:
+                    for i, cs in enumerate(self.validity.T):
+                        valid_counts[:, i] = numpy.bincount(
+                            coordinates, weights=cs, minlength=size
+                        )
+                else:
+                    for i, cs in enumerate(~self.validity.T):
+                        missing_counts[:, i] = numpy.bincount(
+                            coordinates, weights=cs, minlength=size
+                        )
 
     def reduce(self, cube, regions):
-        """Return `regions` with common cells calculated and margins removed."""
+        """Return `regions` reduced to proper output."""
         if self.ignore_missing:
             sums, valid_counts = regions
         else:
             sums, missing_counts = regions
-
-        cube._compute_common_cells_from_marginal_diffs(sums)
-        sums = sums[cube.marginless]
 
         new = 0 if self.return_validity else "nan"
         if self.ignore_missing:
-            cube._compute_common_cells_from_marginal_diffs(valid_counts)
-            valid_counts = valid_counts[cube.marginless]
             sums = self.adjust_zeros(sums, new, condition=valid_counts == 0)
         else:
-            cube._compute_common_cells_from_marginal_diffs(missing_counts)
-            missing_counts = missing_counts[cube.marginless]
             sums = self.adjust_zeros(sums, new, condition=missing_counts != 0)
 
         if self.return_validity:
@@ -520,7 +566,7 @@ class ffunc_sum(ffunc):
             return sums
 
 
-class ffunc_mean(ffunc):
+class xfunc_mean(xfunc):
     """Calculate the means of an array contingent on a cube.
 
     The `arr` arg must be a NumPy array of numeric values to be meaned,
@@ -542,6 +588,8 @@ class ffunc_mean(ffunc):
 
     def __init__(self, arr, weights=None, ignore_missing=False, return_validity=False):
         summables, validity = as_separate_validity(arr)
+        self.shape = summables.shape[1:]
+        self.size = numpy.prod(self.shape, 0)
 
         if weights is None:
             summables = summables.copy()
@@ -563,18 +611,14 @@ class ffunc_mean(ffunc):
         self.return_validity = return_validity
 
     def get_initial_regions(self, cube):
-        """Return NumPy arrays to fill, empty except for corner values."""
-        dtype = int if self.weights is None else float
-
+        """Return empty NumPy arrays to fill."""
         # summables may itself be an N-dimensional numeric array
-        shape = cube.working_shape + self.summables.shape[1:]
-        sums = numpy.zeros(shape, dtype=self.summables.dtype)
-        valid_counts = numpy.zeros(shape, dtype=dtype)
-
-        # Set the "grand total" value in the corner of each region.
-        sums[cube.corner] = numpy.nansum(self.summables, axis=0)
-        valid_counts[cube.corner] = numpy.sum(self.countables, axis=0)
-
+        shape = cube.shape + self.summables.shape[1:]
+        if not shape:
+            shape = (1,)
+        sums = numpy.zeros(shape, dtype=float)
+        # This is *weighted* counts.
+        valid_counts = numpy.zeros(shape, dtype=float)
         if self.ignore_missing:
             return sums, valid_counts
         else:
@@ -583,47 +627,60 @@ class ffunc_mean(ffunc):
             # Unlike valid_counts, which uses self.countables which is weighted,
             # this uses self.validity which is unweighted.
             missing_counts = numpy.zeros(shape, dtype=int)
-            missing_counts[cube.corner] = numpy.count_nonzero(~self.validity, axis=0)
             return sums, valid_counts, missing_counts
 
-    def fill(self, cube, regions):
-        """Fill the `regions` arrays with distributions contingent on cube.dims.
+    def fill(self, coordinates, regions):
+        """Fill the `regions` arrays with distributions contingent on coordinates.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
         one which has already been initialized (including any corner values).
         We will compute its common cells from the margins later in self.reduce.
         """
+        # Flatten our regions so flat bincount output can overwrite it in place.
+        regions = self.flat_regions(regions)
+
         if self.ignore_missing:
             sums, valid_counts = regions
         else:
             sums, valid_counts, missing_counts = regions
 
-        def _fill(x_coords, x_rowids):
-            # This can be called millions of times, so it's critical
-            # to perform as few passes over the data as possible.
-            # We set summables/countables[~validity] = 0 so there's
-            # no need to filter them out again here.
-            sums[x_coords] = numpy.nansum(self.summables[x_rowids], axis=0, dtype=float)
-            valid_counts[x_coords] = numpy.sum(self.countables[x_rowids], axis=0)
-            if not self.ignore_missing:
-                vcount = numpy.count_nonzero(self.validity[x_rowids], axis=0)
-                missing_counts[x_coords] = len(x_rowids) - vcount
+        # This can be called thousands of times, so it's critical
+        # to perform as few passes over the data as possible.
+        # We set summables/countables[~validity] = 0 so there's
+        # no need to filter them out again here.
 
-        cube.walk(_fill)
+        if coordinates is None:
+            sums[:] = numpy.nansum(self.summables, axis=0)
+            valid_counts[:] = numpy.sum(self.countables, axis=0)
+            if not self.ignore_missing:
+                missing_counts[:] = numpy.sum(~self.validity, axis=0)
+        else:
+            size = sums.shape[0]
+            if self.summables.ndim == 1:
+                sums[:] = numpy.bincount(
+                    coordinates, weights=self.summables, minlength=size
+                )
+                valid_counts[:] = numpy.bincount(
+                    coordinates, weights=self.countables, minlength=size
+                )
+            elif self.summables.ndim == 2:
+                for i, ss in enumerate(self.summables.T):
+                    sums[:, i] = numpy.bincount(coordinates, weights=ss, minlength=size)
+                for i, cs in enumerate(self.countables.T):
+                    valid_counts[:, i] = numpy.bincount(
+                        coordinates, weights=cs, minlength=size
+                    )
+            if not self.ignore_missing:
+                missing_counts[:] = numpy.bincount(
+                    coordinates, weights=~self.validity, minlength=size
+                )
 
     def reduce(self, cube, regions):
-        """Return `regions` with common cells calculated and margins removed."""
+        """Return `regions` reduced to proper output."""
         if self.ignore_missing:
             sums, valid_counts = regions
         else:
             sums, valid_counts, missing_counts = regions
-
-        cube._compute_common_cells_from_marginal_diffs(sums)
-        cube._compute_common_cells_from_marginal_diffs(valid_counts)
-
-        sums = sums[cube.marginless]
-        valid_counts = valid_counts[cube.marginless]
-        valid_counts = self.adjust_zeros(valid_counts, new=0)
 
         sums = self.adjust_zeros(
             sums, new=0 if self.return_validity else "nan", condition=valid_counts == 0
@@ -633,8 +690,6 @@ class ffunc_mean(ffunc):
             means = sums / valid_counts
 
         if not self.ignore_missing:
-            cube._compute_common_cells_from_marginal_diffs(missing_counts)
-            missing_counts = missing_counts[cube.marginless]
             if means.shape:
                 means[missing_counts.nonzero()] = float("nan")
             elif missing_counts != 0:
