@@ -711,6 +711,201 @@ class xfunc_mean(xfunc):
             return means
 
 
+class xfunc_stddev(xfunc):
+    """Calculate the standard deviations of an array contingent on a cube.
+
+    The `arr` arg must be a NumPy array of numeric values to be stddeved,
+    or a tuple of (values, validity) arrays, corresponding row-wise
+    to any cube.dims.
+
+    If `weights` is given and not None, it must be a NumPy array of numeric
+    weight values, or a (weights, validity) tuple, corresponding row-wise
+    to any cube.dims.
+
+    If `return_missing_as` is NaN (the default), the `reduce` method will
+    return a single numeric NumPy array of stddevs. Any NaN values in it
+    indicate missing cells (an output cell that had no inputs, or a NaN
+    weight value, and therefore no stddev). If `return_missing_as` is a 2-tuple,
+    like (0, False), the `reduce` method will return a NumPy array of stddevs,
+    and a second "validity" NumPy array of booleans. Missing values will have
+    0 in the former and False in the latter.
+    """
+
+    def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
+        summables, validity = as_separate_validity(arr)
+        self.shape = summables.shape[1:]
+        self.size = numpy.prod(self.shape, 0)
+
+        if weights is None:
+            summables = summables.copy()
+            countables = validity.astype(int)
+        else:
+            weights, weights_validity = as_separate_validity(weights)
+            validity = (validity.T & weights_validity).T
+            summables = (summables.T * weights).T
+            countables = (validity.T * weights).T
+
+        summables[~validity] = float("nan")
+        # This is *weighted* counts.
+        countables[~validity] = 0
+
+        self.summables = summables
+        self.validity = validity
+        self.countables = countables
+        self.weights = weights
+        self.ignore_missing = ignore_missing
+        self.return_missing_as = return_missing_as
+        if isinstance(self.return_missing_as, tuple):
+            self.null = self.return_missing_as[0]
+        else:
+            self.null = self.return_missing_as
+
+    def get_initial_regions(self, cube):
+        """Return empty NumPy arrays to fill."""
+        # summables may itself be an N-dimensional numeric array
+        shape = cube.shape + self.summables.shape[1:]
+        if not shape:
+            shape = (1,)
+        stddevs = numpy.full(shape, self.null, dtype=float)
+        if self.ignore_missing:
+            valid_counts = numpy.zeros(shape, dtype=int)
+            return stddevs, valid_counts
+        else:
+            missing_counts = numpy.zeros(shape, dtype=int)
+            return stddevs, missing_counts
+
+    def fill(self, coordinates, regions):
+        """Fill the `regions` arrays with distributions contingent on coordinates.
+
+        The given `regions` are assumed to be part of a (possibly larger) cube,
+        one which has already been initialized (including any corner values).
+        We will compute its common cells from the margins later in self.reduce.
+        """
+        # Flatten our regions so flat bincount output can overwrite it in place.
+        regions = self.flat_regions(regions)
+
+        if self.ignore_missing:
+            stddevs, valid_counts = regions
+        else:
+            stddevs, missing_counts = regions
+
+        # This can be called thousands of times, so it's critical
+        # to perform as few passes over the data as possible.
+        # We set summables/countables[~validity] = 0 so there's
+        # no need to filter them out again here.
+
+        if coordinates is None:
+            sums = numpy.nansum(self.summables, axis=0)
+            wcounts = numpy.nansum(self.countables, axis=0)
+            means = sums / wcounts
+            squared_variances = (self.summables - means) ** 2
+            if self.weights is not None:
+                squared_variances = (squared_variances.T * self.weights).T
+
+            varsums = numpy.nansum(squared_variances, axis=0)
+            N = numpy.count_nonzero(self.validity, axis=0)
+
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                if self.weights is None:
+                    stddevs[:] = numpy.sqrt(varsums / (N - 1))
+                else:
+                    stddevs[:] = numpy.sqrt((varsums / wcounts) * (N / (N - 1)))
+
+            if self.ignore_missing:
+                valid_counts[:] = N
+            else:
+                missing_counts[:] = numpy.sum(~self.validity, axis=0)
+        else:
+            size = stddevs.shape[0]
+            if self.summables.ndim == 1:
+                if self.ignore_missing:
+                    coords = coordinates[self.validity]
+                    summables = self.summables[self.validity]
+                    countables = self.countables[self.validity]
+                else:
+                    coords = coordinates
+                    summables = self.summables
+                    countables = self.countables
+
+                sums = numpy.bincount(coords, weights=summables, minlength=size)
+                wcounts = numpy.bincount(coords, weights=countables, minlength=size)
+                means = sums / wcounts
+
+                # Neat trick: means[coords] gives us the appropriate
+                # classified mean for each input row.
+                squared_variances = (summables - means[coords]) ** 2
+                if self.weights is not None:
+                    squared_variances *= self.weights
+                varsums = numpy.bincount(
+                    coords, weights=squared_variances, minlength=size
+                )
+                N = numpy.bincount(
+                    coords,
+                    weights=None if self.ignore_missing else self.validity,
+                    minlength=size,
+                )
+
+                with numpy.errstate(divide="ignore", invalid="ignore"):
+                    if self.weights is None:
+                        stddevs[:] = numpy.sqrt(varsums / (N - 1))
+                    else:
+                        stddevs[:] = numpy.sqrt((varsums / wcounts) * (N / (N - 1)))
+            elif self.summables.ndim == 2:
+                for i in range(self.summables.shape[1]):
+                    sums = numpy.bincount(
+                        coordinates, weights=self.summables[:, i], minlength=size
+                    )
+                    wcounts = numpy.bincount(
+                        coordinates, weights=self.countables[:, i], minlength=size
+                    )
+                    means = sums / wcounts
+
+                    squared_variances = (self.summables[:, i] - means[coordinates]) ** 2
+                    if self.weights is not None:
+                        squared_variances *= self.weights
+                    varsums = numpy.bincount(
+                        coordinates, weights=squared_variances, minlength=size
+                    )
+                    N = numpy.bincount(
+                        coordinates, weights=self.validity[:, i], minlength=size
+                    )
+
+                    with numpy.errstate(divide="ignore", invalid="ignore"):
+                        if self.weights is None:
+                            stddevs[:, i] = numpy.sqrt(varsums / (N - 1))
+                        else:
+                            stddevs[:, i] = numpy.sqrt(
+                                (varsums / wcounts) * (N / (N - 1))
+                            )
+
+            if self.ignore_missing:
+                valid_counts[:] = N
+            else:
+                missing_counts[:] = numpy.bincount(
+                    coordinates, weights=~self.validity, minlength=size
+                )
+
+    def reduce(self, cube, regions):
+        """Return `regions` reduced to proper output."""
+        if self.ignore_missing:
+            stddevs, valid_counts = regions
+            stddevs = self.adjust_zeros(stddevs, self.null, condition=valid_counts == 0)
+        else:
+            stddevs, missing_counts = regions
+            stddevs = self.adjust_zeros(
+                stddevs, self.null, condition=missing_counts != 0
+            )
+
+        if isinstance(self.return_missing_as, tuple):
+            if self.ignore_missing:
+                validity = valid_counts != 0
+            else:
+                validity = missing_counts == 0
+            return stddevs, validity
+        else:
+            return stddevs
+
+
 class xfunc_op_base(xfunc):
     """Calculate self.op() of an array contingent on a cube.
 
