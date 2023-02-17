@@ -286,7 +286,7 @@ class ffunc_count(ffunc):
                 cube._compute_common_cells_from_marginal_diffs(missing_counts)
                 missing_counts = missing_counts[cube.marginless]
                 validity = missing_counts == 0
-            counts[~validity] = self.null
+            counts = self.adjust_zeros(counts, new=self.null, condition=~validity)
 
             if isinstance(self.return_missing_as, tuple):
                 return counts, validity
@@ -321,7 +321,7 @@ class ffunc_valid_count(ffunc):
             countables = validity.copy()
         else:
             weights, weights_validity = as_separate_validity(weights)
-            validity = validity & weights_validity
+            validity = (validity.T & weights_validity).T
             countables = (validity.T * weights).T
 
         countables[~validity] = 0
@@ -437,7 +437,7 @@ class ffunc_sum(ffunc):
             summables = summables.copy()
         else:
             weights, weights_validity = as_separate_validity(weights)
-            validity = validity & weights_validity
+            validity = (validity.T & weights_validity).T
             summables = (summables.T * weights).T
 
         summables[~validity] = 0
@@ -635,18 +635,15 @@ class ffunc_mean(ffunc):
         valid_counts = valid_counts[cube.marginless]
         valid_counts = self.adjust_zeros(valid_counts, new=0)
 
-        sums = self.adjust_zeros(sums, self.null, condition=valid_counts == 0)
-
         with numpy.errstate(divide="ignore", invalid="ignore"):
             means = sums / valid_counts
 
-        if not self.ignore_missing:
+        if self.ignore_missing:
+            means = self.adjust_zeros(means, self.null, condition=valid_counts == 0)
+        else:
             cube._compute_common_cells_from_marginal_diffs(missing_counts)
             missing_counts = missing_counts[cube.marginless]
-            if means.shape:
-                means[missing_counts.nonzero()] = self.null
-            elif missing_counts != 0:
-                means = means.dtype.type(self.null)
+            means = self.adjust_zeros(means, self.null, condition=missing_counts != 0)
 
         if isinstance(self.return_missing_as, tuple):
             if self.ignore_missing:

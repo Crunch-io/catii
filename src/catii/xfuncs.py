@@ -330,7 +330,7 @@ class xfunc_valid_count(xfunc):
             countables = validity.copy()
         else:
             weights, weights_validity = as_separate_validity(weights)
-            validity = validity & weights_validity
+            validity = (validity.T & weights_validity).T
             countables = (validity.T * weights).T
 
         countables[~validity] = 0
@@ -465,7 +465,7 @@ class xfunc_sum(xfunc):
             summables = summables.copy()
         else:
             weights, weights_validity = as_separate_validity(weights)
-            validity = validity & weights_validity
+            validity = (validity.T & weights_validity).T
             summables = (summables.T * weights).T
 
         summables[~validity] = 0
@@ -687,19 +687,14 @@ class xfunc_mean(xfunc):
         """Return `regions` reduced to proper output."""
         if self.ignore_missing:
             sums, valid_counts = regions
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                means = sums / valid_counts
+            means = self.adjust_zeros(means, self.null, condition=valid_counts == 0)
         else:
             sums, valid_counts, missing_counts = regions
-
-        sums = self.adjust_zeros(sums, self.null, condition=valid_counts == 0)
-
-        with numpy.errstate(divide="ignore", invalid="ignore"):
-            means = sums / valid_counts
-
-        if not self.ignore_missing:
-            if means.shape:
-                means[missing_counts.nonzero()] = self.null
-            elif missing_counts != 0:
-                means = means.dtype.type(self.null)
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                means = sums / valid_counts
+            means = self.adjust_zeros(means, self.null, condition=missing_counts != 0)
 
         if isinstance(self.return_missing_as, tuple):
             if self.ignore_missing:
@@ -737,15 +732,20 @@ class xfunc_stddev(xfunc):
         self.size = numpy.prod(self.shape, 0)
 
         if weights is None:
-            summables = summables.copy()
             countables = validity.astype(int)
         else:
             weights, weights_validity = as_separate_validity(weights)
             validity = (validity.T & weights_validity).T
-            summables = (summables.T * weights).T
             countables = (validity.T * weights).T
 
+        summables = summables.astype(float)
+        summables = summables.copy()
         summables[~validity] = float("nan")
+        if weights is None:
+            self.wsummables = summables
+        else:
+            self.wsummables = (summables.T * weights).T
+
         # This is *weighted* counts.
         countables[~validity] = 0
 
@@ -784,112 +784,137 @@ class xfunc_stddev(xfunc):
         # Flatten our regions so flat bincount output can overwrite it in place.
         regions = self.flat_regions(regions)
 
-        if self.ignore_missing:
-            stddevs, valid_counts = regions
-        else:
-            stddevs, missing_counts = regions
-
-        # This can be called thousands of times, so it's critical
-        # to perform as few passes over the data as possible.
-        # We set summables/countables[~validity] = 0 so there's
-        # no need to filter them out again here.
-
         if coordinates is None:
-            sums = numpy.nansum(self.summables, axis=0)
-            wcounts = numpy.nansum(self.countables, axis=0)
-            means = sums / wcounts
-            squared_variances = (self.summables - means) ** 2
-            if self.weights is not None:
-                squared_variances = (squared_variances.T * self.weights).T
-
-            varsums = numpy.nansum(squared_variances, axis=0)
-            N = numpy.count_nonzero(self.validity, axis=0)
-
-            with numpy.errstate(divide="ignore", invalid="ignore"):
-                if self.weights is None:
-                    stddevs[:] = numpy.sqrt(varsums / (N - 1))
-                else:
-                    stddevs[:] = numpy.sqrt((varsums / wcounts) * (N / (N - 1)))
-
-            if self.ignore_missing:
-                valid_counts[:] = N
-            else:
-                missing_counts[:] = numpy.sum(~self.validity, axis=0)
-        else:
-            size = stddevs.shape[0]
             if self.summables.ndim == 1:
-                if self.ignore_missing:
-                    coords = coordinates[self.validity]
-                    summables = self.summables[self.validity]
-                    countables = self.countables[self.validity]
-                else:
-                    coords = coordinates
-                    summables = self.summables
-                    countables = self.countables
-
-                sums = numpy.bincount(coords, weights=summables, minlength=size)
-                wcounts = numpy.bincount(coords, weights=countables, minlength=size)
-                means = sums / wcounts
-
-                # Neat trick: means[coords] gives us the appropriate
-                # classified mean for each input row.
-                squared_variances = (summables - means[coords]) ** 2
-                if self.weights is not None:
-                    squared_variances *= self.weights
-                varsums = numpy.bincount(
-                    coords, weights=squared_variances, minlength=size
+                self._fill_one_no_coordinates(
+                    regions,
+                    self.summables,
+                    self.wsummables,
+                    self.countables,
+                    self.validity,
                 )
-                N = numpy.bincount(
-                    coords,
-                    weights=None if self.ignore_missing else self.validity,
-                    minlength=size,
-                )
-
-                with numpy.errstate(divide="ignore", invalid="ignore"):
-                    if self.weights is None:
-                        stddevs[:] = numpy.sqrt(varsums / (N - 1))
-                    else:
-                        stddevs[:] = numpy.sqrt((varsums / wcounts) * (N / (N - 1)))
             elif self.summables.ndim == 2:
                 for i in range(self.summables.shape[1]):
-                    sums = numpy.bincount(
-                        coordinates, weights=self.summables[:, i], minlength=size
+                    self._fill_one_no_coordinates(
+                        [r[:, i] for r in regions],
+                        self.summables[:, i],
+                        self.wsummables[:, i],
+                        self.countables[:, i],
+                        self.validity[:, i],
                     )
-                    wcounts = numpy.bincount(
-                        coordinates, weights=self.countables[:, i], minlength=size
-                    )
-                    means = sums / wcounts
-
-                    squared_variances = (self.summables[:, i] - means[coordinates]) ** 2
-                    if self.weights is not None:
-                        squared_variances *= self.weights
-                    varsums = numpy.bincount(
-                        coordinates, weights=squared_variances, minlength=size
-                    )
-                    N = numpy.bincount(
-                        coordinates, weights=self.validity[:, i], minlength=size
-                    )
-
-                    with numpy.errstate(divide="ignore", invalid="ignore"):
-                        if self.weights is None:
-                            stddevs[:, i] = numpy.sqrt(varsums / (N - 1))
-                        else:
-                            stddevs[:, i] = numpy.sqrt(
-                                (varsums / wcounts) * (N / (N - 1))
-                            )
-
-            if self.ignore_missing:
-                valid_counts[:] = N
-            else:
-                missing_counts[:] = numpy.bincount(
-                    coordinates, weights=~self.validity, minlength=size
+        else:
+            if self.summables.ndim == 1:
+                self._fill_one_by_coordinates(
+                    regions,
+                    coordinates,
+                    self.summables,
+                    self.wsummables,
+                    self.countables,
+                    self.validity,
                 )
+            elif self.summables.ndim == 2:
+                for i in range(self.summables.shape[1]):
+                    self._fill_one_by_coordinates(
+                        [r[:, i] for r in regions],
+                        coordinates,
+                        self.summables[:, i],
+                        self.wsummables[:, i],
+                        self.countables[:, i],
+                        self.validity[:, i],
+                    )
+
+    def _fill_one_no_coordinates(
+        self, regions, summables, wsummables, countables, validity
+    ):
+        # Weighted mean
+        if self.ignore_missing:
+            stddevs, valid_counts = regions
+            summables = summables[validity]
+            wsummables = wsummables[validity]
+            countables = countables[validity]
+            weights = None if self.weights is None else self.weights[validity]
+        else:
+            stddevs, missing_counts = regions
+            weights = self.weights
+
+        N = numpy.count_nonzero(validity, axis=0)
+        if len(summables) >= 2:
+            # Weighted mean
+            wsums = numpy.nansum(wsummables, axis=0)
+            wcounts = numpy.nansum(countables, axis=0)
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                wmeans = wsums / wcounts
+
+            # Note we subtract *weighted* means from *UN-weighted* values.
+            squared_variances = (summables - wmeans) ** 2
+            if weights is not None:
+                squared_variances = (squared_variances.T * weights).T
+
+            varsums = numpy.nansum(squared_variances, axis=0)
+
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                if weights is None:
+                    stddevs[:] = numpy.sqrt(varsums / (N - 1))
+                else:
+                    stddevs[:] = numpy.sqrt(
+                        (varsums / numpy.nansum(weights)) * (N / (N - 1))
+                    )
+
+        if self.ignore_missing:
+            valid_counts[:] = N
+        else:
+            missing_counts[:] = len(self.summables) - N
+
+    def _fill_one_by_coordinates(
+        self, regions, coordinates, summables, wsummables, countables, validity
+    ):
+        if self.ignore_missing:
+            stddevs, valid_counts = regions
+            coords = coordinates[validity]
+            summables = summables[validity]
+            wsummables = wsummables[validity]
+            countables = countables[validity]
+            weights = None if self.weights is None else self.weights[validity]
+        else:
+            stddevs, missing_counts = regions
+            coords = coordinates
+            weights = self.weights
+        size = stddevs.shape[0]
+
+        # Weighted mean
+        wsums = numpy.bincount(coords, weights=wsummables, minlength=size)
+        wcounts = numpy.bincount(coords, weights=countables, minlength=size)
+        with numpy.errstate(divide="ignore", invalid="ignore"):
+            wmeans = wsums / wcounts
+
+        # Note we subtract *weighted* means from *UN-weighted* values.
+        # Neat trick: wmeans[coords] gives us the appropriate
+        # classified mean for each input row.
+        squared_variances = (summables - wmeans[coords]) ** 2
+        if weights is not None:
+            squared_variances = (squared_variances.T * weights).T
+        varsums = numpy.bincount(coords, weights=squared_variances, minlength=size)
+        N = numpy.bincount(coords, minlength=size)
+
+        with numpy.errstate(divide="ignore", invalid="ignore"):
+            if weights is None:
+                stddevs[:] = numpy.sqrt(varsums / (N - 1))
+            else:
+                weightsums = numpy.bincount(coords, weights=weights, minlength=size)
+                stddevs[:] = numpy.sqrt((varsums / weightsums) * (N / (N - 1)))
+
+        if self.ignore_missing:
+            valid_counts[:] = N
+        else:
+            missing_counts[:] = numpy.bincount(
+                coordinates, weights=~validity, minlength=size
+            )
 
     def reduce(self, cube, regions):
         """Return `regions` reduced to proper output."""
         if self.ignore_missing:
             stddevs, valid_counts = regions
-            stddevs = self.adjust_zeros(stddevs, self.null, condition=valid_counts == 0)
+            stddevs = self.adjust_zeros(stddevs, self.null, condition=valid_counts < 2)
         else:
             stddevs, missing_counts = regions
             stddevs = self.adjust_zeros(
@@ -898,7 +923,7 @@ class xfunc_stddev(xfunc):
 
         if isinstance(self.return_missing_as, tuple):
             if self.ignore_missing:
-                validity = valid_counts != 0
+                validity = valid_counts > 1
             else:
                 validity = missing_counts == 0
             return stddevs, validity

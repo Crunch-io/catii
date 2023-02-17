@@ -86,13 +86,12 @@ class TestXfuncStddevWorkflow:
         coordinates = reduce(operator.add, cube.strided_dims())
         f.fill(coordinates, (stddevs, missings))
         assert arr_eq(
-            stddevs,
-            [[3.2657311585615862, float("nan")], [float("nan"), 3.724916106437835]],
+            stddevs, [[2.37170825, float("nan")], [float("nan"), 3.67423461]],
         )
         assert missings.tolist() == [[0, 0], [2, 0]]
         assert arr_eq(
             f.reduce(cube, (stddevs, missings)),
-            [[3.2657311585615862, float("nan")], [float("nan"), 3.724916106437835]],
+            [[2.37170825, float("nan")], [float("nan"), 3.67423461]],
         )
 
     def test_single_arr_with_nan_workflow(self):
@@ -123,10 +122,10 @@ class TestXfuncStddevIgnoreMissing:
 
         # The cube of arr1 has rowids:
         # 0           1
-        # [1, 3, 4]  [0, 2]
+        # [1, 3, 5, 7]  [0, 2, 4, 6]
         # and fact values:
         # 0           1
-        # [2.0, 4.0, 5.0]  [1.0, nan]
+        # [2.0, 4.0, 6.0, 100.0]  [1.0, nan, 5.0, 7.0]
 
         stddevs = xcube([arr1]).stddev(factvar)
         # Cell (1,) MUST be missing, because it had a missing input.
@@ -134,26 +133,42 @@ class TestXfuncStddevIgnoreMissing:
 
         stddevs = xcube([arr1]).stddev(factvar, ignore_missing=True)
         # Cell (1,) MUST NOT be missing, because it had a valid input.
-        assert arr_eq(stddevs, [48.02776974, 3.05505046])
+        assert arr_eq(stddevs, [48.02776974, 3.055050463303893])
 
         # The cube of arr1 x arr2 has fact values:
-        #      ______arr 2______
-        #      0           1
-        # a|0  [2.0, 5.0]  [4.0]
+        #      ________arr 2________
+        #      0                  1
+        # a|0  [2.0, 6.0, 100.0]  [4.0]
         # r|
         # r|
-        # 1|1  [nan]       [1.0]
+        # 1|1  [nan, 5.0]     [1.0, 7.0]
 
         stddevs = xcube([arr1, arr2]).stddev(factvar)
-        # Cell (1, 0) MUST be missing, because it had a missing fact value.
         assert arr_eq(
-            stddevs, [[55.46169849544819, float("nan")], [float("nan"), 4.24264069]]
+            stddevs,
+            [
+                # Cell (0, 1) MUST be missing, because although it had
+                # a non-missing input, it was only one and cannot have
+                # a standard deviation.
+                [55.46169849544819, float("nan")],
+                # Cell (1, 0) MUST be missing, because it had a missing fact.
+                [float("nan"), 4.24264069],
+            ],
         )
 
         stddevs = xcube([arr1, arr2]).stddev(factvar, ignore_missing=True)
-        # Cell (1, 0) MUST be missing, because it had no non-missing inputs.
         assert arr_eq(
-            stddevs, [[55.46169849544819, float("nan")], [float("nan"), 4.24264069]]
+            stddevs,
+            [
+                # Cell (0, 1) MUST be missing, because although it had
+                # a non-missing input, it was only one and cannot have
+                # a standard deviation.
+                [55.46169849544819, float("nan")],
+                # Cell (1, 0) MUST be missing, because although it had
+                # a non-missing input, it was only one and cannot have
+                # a standard deviation.
+                [float("nan"), 4.24264069],
+            ],
         )
 
 
