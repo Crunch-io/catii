@@ -1151,3 +1151,107 @@ class xfunc_corrcoef(xfunc):
             return corrcoefs, ~missings
         else:
             return corrcoefs
+
+
+class xfunc_covariance(xfunc):
+    """Estimate the covariance matrixes of an array contingent on a cube.
+
+    The `arr` arg must be a NumPy array of numeric values to be analyzed,
+    or a tuple of (values, validity) arrays, corresponding row-wise
+    to any cube.dims.
+
+    If `weights` is given and not None, it must be a NumPy array of numeric
+    weight values, or a (weights, validity) tuple, corresponding row-wise
+    to any cube.dims.
+
+    If `return_missing_as` is NaN (the default), the `reduce` method will
+    return a single numeric NumPy array of covariance matrixes, one matrix
+    of shape C * C, where C is the number of columns in the array, per distinct
+    combination of the cube.dims. Any NaN values in it indicate missing cells
+    (an output cell that had no inputs, or a NaN weight value, and therefore
+    no output). If `return_missing_as` is a 2-tuple, like (0, False), the
+    `reduce` method will return a NumPy array of matrixes, and a second
+    "validity" NumPy array of booleans. Missing values will have 0 in the
+    former and False in the latter.
+    """
+
+    def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
+        arr, validity = as_separate_validity(arr)
+        self.shape = arr.shape[1:] + arr.shape[1:]
+        self.size = numpy.prod(self.shape, 0)
+
+        if weights is not None:
+            weights, weights_validity = as_separate_validity(weights)
+            validity = (validity.T & weights_validity).T
+            weights = weights.copy()
+            weights[~weights_validity] = NaN
+
+        self.arr = arr.astype(float).copy()
+        self.validity = validity
+        if self.validity.ndim > 1:
+            # if self.ignore_missing then we want to keep only complete cases,
+            # like R's `use=na.or.complete`.
+            self.validity = numpy.all(
+                validity.T, axis=tuple(d for d in range(self.validity.ndim) if d != 1)
+            )
+        self.weights = weights
+        self.ignore_missing = ignore_missing
+        self.return_missing_as = return_missing_as
+        if isinstance(self.return_missing_as, tuple):
+            self.null = self.return_missing_as[0]
+        else:
+            self.null = self.return_missing_as
+
+    def get_initial_regions(self, cube):
+        """Return empty NumPy arrays to fill."""
+        shape = cube.shape + self.shape
+        if not shape:
+            shape = (1,)
+        covs = numpy.full(shape, self.null, dtype=float)
+        return (covs,)
+
+    def fill(self, coordinates, regions):
+        """Fill the `regions` arrays with distributions contingent on coordinates.
+
+        The given `regions` are assumed to be part of a (possibly larger) cube,
+        one which has already been initialized (including any corner values).
+        We will compute its common cells from the margins later in self.reduce.
+        """
+        (covs,) = self.flat_regions(regions)
+
+        if self.ignore_missing:
+            arr = self.arr[self.validity]
+        else:
+            arr = self.arr
+
+        if self.weights is None:
+            aweights = None
+        else:
+            if self.ignore_missing:
+                aweights = self.weights[self.validity]
+            else:
+                aweights = self.weights
+            if len(aweights) == 0:
+                aweights = None
+
+        if coordinates is None:
+            covs[:] = numpy.cov(arr.T, aweights=aweights)
+        else:
+            if self.ignore_missing:
+                coordinates = coordinates[self.validity]
+            for i, rowmask in self.bins(coordinates):
+                if aweights is None:
+                    w = None
+                else:
+                    w = aweights[rowmask]
+                covs[i] = numpy.cov(arr[rowmask].T, aweights=w)
+
+    def reduce(self, cube, regions):
+        """Return `regions` reduced to proper output."""
+        (covs,) = regions
+        if isinstance(self.return_missing_as, tuple):
+            missings = numpy.isnan(covs)
+            covs[missings] = self.null
+            return covs, ~missings
+        else:
+            return covs
