@@ -3,7 +3,7 @@ import struct
 
 import numpy
 
-from .index import fit_dtype
+from .iindexes import fit_dtype
 
 
 class IndxIO(object):

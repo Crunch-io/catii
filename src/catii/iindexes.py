@@ -661,6 +661,9 @@ class iindex(dict):
         If a single integer, only that slice is included, and that axis is
         collapsed in the output. If None, that axis is included unchanged.
         """
+        if not orders:
+            return self
+
         if len(orders) > self.ndim - 1:
             raise TypeError(
                 "Cannot slice %d axes with shape %r." % (len(orders), self.shape)
