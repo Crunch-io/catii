@@ -182,7 +182,7 @@ class ffunc_count(ffunc):
             N = self.N
         elif cube.dims:
             N = cube.dims[0].shape[0]
-        elif self.weights and self.weights.shape:
+        elif self.weights is not None and self.weights.shape:
             N = self.weights.shape[0]
         else:
             raise ValueError(

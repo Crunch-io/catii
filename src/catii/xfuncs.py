@@ -1187,6 +1187,7 @@ class xfunc_covariance(xfunc):
             weights[~weights_validity] = NaN
 
         self.arr = arr.astype(float).copy()
+        self.arr[~validity] = NaN
         self.validity = validity
         if self.validity.ndim > 1:
             # if self.ignore_missing then we want to keep only complete cases,

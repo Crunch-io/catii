@@ -42,12 +42,10 @@ class TestXfuncCovarianceWorkflow:
         assert arr_eq(covs, null_matrix)
         coordinates = None
         f.fill(coordinates, (covs,))
-        assert arr_eq(
-            covs, [[1.0, -0.99840383, NaN], [-0.99840383, 1.0, NaN], [NaN, NaN, NaN]],
-        )
+        assert arr_eq(covs, [[6.0, -12.5, NaN], [-12.5, 26.125, NaN], [NaN, NaN, NaN]])
         assert arr_eq(
             f.reduce(cube, (covs,)),
-            [[1.0, -0.99840383, NaN], [-0.99840383, 1.0, NaN], [NaN, NaN, NaN]],
+            [[6.0, -12.5, NaN], [-12.5, 26.125, NaN], [NaN, NaN, NaN]],
         )
 
         cube = xcube([arr1])
@@ -55,20 +53,20 @@ class TestXfuncCovarianceWorkflow:
         assert arr_eq(covs, [null_matrix, null_matrix])
         coordinates = reduce(operator.add, cube.strided_dims())
         f.fill(coordinates, (covs,))
-        assert arr_eq(
-            covs,
+        expected = [
             [
-                [[1.0, -1.0, 0.4], [-1.0, 1.0, -0.4], [0.4, -0.4, 1.0]],
-                [[1.0, -0.99838144, NaN], [-0.99838144, 1.0, NaN], [NaN, NaN, NaN]],
+                [6.66666667, -13.33333333, 1.33333333],
+                [-13.33333333, 26.66666667, -2.66666667],
+                [1.33333333, -2.66666667, 1.66666667],
             ],
-        )
-        assert arr_eq(
-            f.reduce(cube, (covs,)),
             [
-                [[1.0, -1.0, 0.4], [-1.0, 1.0, -0.4], [0.4, -0.4, 1.0]],
-                [[1.0, -0.99838144, NaN], [-0.99838144, 1.0, NaN], [NaN, NaN, NaN]],
+                [6.66666667, -14.33333333, NaN],
+                [-14.33333333, 30.91666667, NaN],
+                [NaN, NaN, NaN],
             ],
-        )
+        ]
+        assert arr_eq(covs, expected)
+        assert arr_eq(f.reduce(cube, (covs,)), expected,)
 
         cube = xcube([arr1, arr2])
         (covs,) = f.get_initial_regions(cube)
@@ -78,19 +76,19 @@ class TestXfuncCovarianceWorkflow:
         expected = [
             [
                 [
-                    [1.0, -1.0, 0.32732684],
-                    [-1.0, 1.0, -0.32732684],
-                    [0.32732684, -0.32732684, 1.0],
+                    [9.333333333333332, -18.666666666666664, 1.0],
+                    [-18.666666666666664, 37.33333333333333, -2.0],
+                    [1.0, -2.0, 1.0],
                 ],
-                [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]],
+                null_matrix,
             ],
             [
-                [[1.0, -1.0, -1.0], [-1.0, 1.0, 1.0], [-1.0, 1.0, 1.0]],
-                [[1.0, -1.0, NaN], [-1.0, 1.0, NaN], [NaN, NaN, NaN]],
+                [[2.0, -4.0, -1.0], [-4.0, 8.0, 2.0], [-1.0, 2.0, 0.5]],
+                [[18.0, -39.0, NaN], [-39.0, 84.5, NaN], [NaN, NaN, NaN]],
             ],
         ]
         assert arr_eq(covs, expected)
-        assert arr_eq(f.reduce(cube, (covs,)), expected,)
+        assert arr_eq(f.reduce(cube, (covs,)), expected)
 
     def _test_weighted_workflow(self, factvar):
         # Other tests often simply test output; here we test intermediate results.
@@ -106,14 +104,15 @@ class TestXfuncCovarianceWorkflow:
         expected = [
             [
                 [
-                    [1.0, -1.0, -0.97622104],
-                    [-1.0, 1.0, 0.97622104],
-                    [-0.97622104, 0.97622104, 1.0],
+                    [7.999999999999998, -15.999999999999996, -1.9999999999999996],
+                    [-15.999999999999996, 31.999999999999993, 3.999999999999999],
+                    [-1.9999999999999996, 3.999999999999999, 0.4999999999999999],
                 ],
-                [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]],
+                null_matrix,
             ],
-            [null_matrix, [[1.0, -1.0, NaN], [-1.0, 1.0, NaN], [NaN, NaN, NaN]],],
+            [null_matrix, [[18.0, -39.0, NaN], [-39.0, 84.5, NaN], [NaN, NaN, NaN]],],
         ]
+
         assert arr_eq(covs, expected)
         assert arr_eq(f.reduce(cube, (covs,)), expected,)
 
