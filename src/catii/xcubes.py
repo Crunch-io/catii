@@ -35,6 +35,7 @@ class xcube:
 
     poolsize = 4
     debug = False
+    check_interrupt = None
 
     def __init__(self, dims, interacting_shape=None):
         self.dims = [numpy.asarray(d) for d in dims]
@@ -169,6 +170,9 @@ class xcube:
             self._tracing[f] = {"elapsed": 0.0, "start": None, "count": 0}
 
         def fill_one_cube(nested_coords):
+            if self.check_interrupt is not None:
+                self.check_interrupt()
+
             slices1d = [
                 strided_dim if coords is None else strided_dim[(slice(None),) + coords]
                 for coords, strided_dim in zip(nested_coords, strided_dims)

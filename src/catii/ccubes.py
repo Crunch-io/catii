@@ -34,6 +34,7 @@ class ccube:
 
     poolsize = 4
     debug = False
+    check_interrupt = None
 
     def __init__(self, dims, interacting_shape=None):
         self.dims = dims
@@ -274,6 +275,9 @@ class ccube:
             self._tracing[f] = {"elapsed": 0.0, "start": None, "count": 0}
 
         def fill_one_cube(nested_coords):
+            if self.check_interrupt is not None:
+                self.check_interrupt()
+
             subcube = self.subcube(nested_coords)
             if self.debug:
                 print("FILL SUBCUBE:", nested_coords)
