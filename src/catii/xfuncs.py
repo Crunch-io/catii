@@ -1136,7 +1136,14 @@ class xfunc_op_base(xfunc):
         if not shape:
             shape = (1,)
 
-        dtype = float if numpy.isnan(self.null) else self.values.dtype
+        dtype = self.values.dtype
+        if dtype is not float:
+            try:
+                if numpy.isnan(self.null):
+                    dtype = float
+            except TypeError:
+                pass
+
         output_values = numpy.full(shape, self.null, dtype=dtype)
         output_validity = numpy.zeros(shape, dtype=bool)
         return output_values, output_validity
