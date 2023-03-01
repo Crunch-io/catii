@@ -1,6 +1,7 @@
 import itertools
 import multiprocessing.pool
 import operator
+import time
 from contextlib import closing
 from functools import reduce
 
@@ -162,6 +163,11 @@ class xcube:
 
         strided_dims = self.strided_dims()
 
+        self._tracing = {}
+        for f in funcs:
+            # Collect tracing for each ffunc (possibly running concurrently).
+            self._tracing[f] = {"elapsed": 0.0, "start": None, "count": 0}
+
         def fill_one_cube(nested_coords):
             slices1d = [
                 strided_dim if coords is None else strided_dim[(slice(None),) + coords]
@@ -175,6 +181,8 @@ class xcube:
             if self.debug:
                 print("FILL SUBCUBE:", nested_coords)
             for func, regions in zip(funcs, results):
+                start = time.time()
+
                 flattened_slice = [
                     e for coords in nested_coords if coords is not None for e in coords
                 ]
@@ -190,6 +198,12 @@ class xcube:
                 func.fill(coordinates, regions)
                 if self.debug:
                     print(func, ":=", regions)
+
+                bucket = self._tracing[func]
+                bucket["elapsed"] += time.time() - start
+                bucket["count"] += 1
+                if bucket["start"] is None:
+                    bucket["start"] = start
 
         if self.parallel:
             with closing(multiprocessing.pool.ThreadPool(self.poolsize)) as pool:

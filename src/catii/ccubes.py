@@ -1,6 +1,7 @@
 import itertools
 import multiprocessing.pool
 import operator
+import time
 from contextlib import closing
 from functools import reduce
 
@@ -267,11 +268,17 @@ class ccube:
             for func, regions in zip(funcs, results):
                 print(func, ":", regions)
 
+        self._tracing = {}
+        for f in funcs:
+            # Collect tracing for each ffunc (possibly running concurrently).
+            self._tracing[f] = {"elapsed": 0.0, "start": None, "count": 0}
+
         def fill_one_cube(nested_coords):
             subcube = self.subcube(nested_coords)
             if self.debug:
                 print("FILL SUBCUBE:", nested_coords)
             for func, regions in zip(funcs, results):
+                start = time.time()
                 flattened_slice = [
                     e for coords in nested_coords if coords is not None for e in coords
                 ]
@@ -288,6 +295,12 @@ class ccube:
                 self.intersection_data_points += subcube.intersection_data_points
                 if self.debug:
                     print(func, ":=", regions)
+
+                bucket = self._tracing[func]
+                bucket["elapsed"] += time.time() - start
+                bucket["count"] += 1
+                if bucket["start"] is None:
+                    bucket["start"] = start
 
         if self.parallel:
             with closing(multiprocessing.pool.ThreadPool(self.poolsize)) as pool:
