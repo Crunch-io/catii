@@ -380,6 +380,52 @@ class xcube:
             [xfuncs.xfunc_stddev(arr, weights, ignore_missing, return_missing_as)]
         )[0]
 
+    def quantile(
+        self,
+        arr,
+        probability,
+        weights=None,
+        ignore_missing=False,
+        return_missing_as=xfuncs.NaN,
+    ):
+        """Return the q-quantile of an array contingent on self.dims.
+
+        The `arr` arg must be a NumPy array of numeric values to be analyzed,
+        or a tuple of (values, validity) arrays, corresponding row-wise
+        to any cube.dims.
+
+        The `probability` arg must be a number between 0 and 1 inclusive. To obtain
+        the k'th q-quantile, pass `probability = k/q`. For example, to find the
+        median, pass 0.5; to find the last quintile, pass 4/5 = 0.8.
+
+        If `weights` is given and not None, it must be a NumPy array of numeric
+        weight values, or a (weights, validity) tuple, corresponding row-wise
+        to any cube.dims.
+
+        If `ignore_missing` is False (the default), then any missing values
+        are propagated so that outputs also have a missing value in any cell
+        that had a missing value in one of the rows in the fact variable
+        or weight that contributed to that cell. If `ignore_missing` is True,
+        such input rows are ignored and do not contribute to the output,
+        much like NumPy's `nan*` functions or R's `na.rm'.
+
+        If `return_missing_as` is NaN (the default), the `reduce` method will
+        return a single numeric NumPy array of quantiles, one per distinct
+        combination of the cube.dims. Any NaN values in it indicate missing cells
+        (an output cell that had no inputs, or a NaN weight value, and therefore
+        no output). If `return_missing_as` is a 2-tuple, like (0, False), the
+        `reduce` method will return a NumPy array of quantiles, and a second
+        "validity" NumPy array of booleans. Missing values will have 0 in the
+        former and False in the latter.
+        """
+        return self.calculate(
+            [
+                xfuncs.xfunc_quantile(
+                    arr, probability, weights, ignore_missing, return_missing_as
+                )
+            ]
+        )[0]
+
     def max(self, arr, ignore_missing=False, return_missing_as=xfuncs.NaN):
         """Return the maximums of an array contingent on self.dims.
 

@@ -942,6 +942,164 @@ class xfunc_stddev(xfunc):
             return stddevs
 
 
+class xfunc_quantile(xfunc):
+    """Return the q-quantile of an array contingent on a cube.
+
+    The `arr` arg must be a NumPy array of numeric values to be analyzed,
+    or a tuple of (values, validity) arrays, corresponding row-wise
+    to any cube.dims.
+
+    The `probability` arg must be a number between 0 and 1 inclusive. To obtain
+    the k'th q-quantile, pass `probability = k/q`. For example, to find the
+    median, pass 0.5; to find the last quintile, pass 4/5 = 0.8.
+
+    If `weights` is given and not None, it must be a NumPy array of numeric
+    weight values, or a (weights, validity) tuple, corresponding row-wise
+    to any cube.dims.
+
+    If `ignore_missing` is False (the default), then any missing values
+    are propagated so that outputs also have a missing value in any cell
+    that had a missing value in one of the rows in the fact variable
+    or weight that contributed to that cell. If `ignore_missing` is True,
+    such input rows are ignored and do not contribute to the output,
+    much like NumPy's `nan*` functions or R's `na.rm'.
+
+    If `return_missing_as` is NaN (the default), the `reduce` method will
+    return a single numeric NumPy array of quantiles, one per distinct
+    combination of the cube.dims. Any NaN values in it indicate missing cells
+    (an output cell that had no inputs, or a NaN weight value, and therefore
+    no output). If `return_missing_as` is a 2-tuple, like (0, False), the
+    `reduce` method will return a NumPy array of quantiles, and a second
+    "validity" NumPy array of booleans. Missing values will have 0 in the
+    former and False in the latter.
+    """
+
+    def __init__(
+        self,
+        arr,
+        probability,
+        weights=None,
+        ignore_missing=False,
+        return_missing_as=NaN,
+    ):
+        # Coerce to a float array because of this gem:
+        # >>> numpy.nanquantile([1.0, float("inf")], 0)
+        # 1.0
+        # >>> numpy.nanquantile([1.0, float("inf")], 0.0)
+        # nan
+        self.probability = numpy.array(probability, dtype=float)
+
+        arr, validity = as_separate_validity(arr)
+        self.shape = arr.shape[1:]
+        self.size = numpy.prod(self.shape, 0)
+
+        if weights is None:
+            arr = arr.copy()
+        else:
+            weights, weights_validity = as_separate_validity(weights)
+            validity = (validity.T & weights_validity).T
+
+        arr[~validity] = NaN
+
+        self.arr = arr
+
+        # Set negative weights to 0, like SAS EXCLNPWGT option
+        if weights is not None:
+            neg_weights = weights < 0
+            if neg_weights.any():
+                weights = weights.copy()
+                weights[neg_weights] = 0
+        self.weights = weights
+
+        self.ignore_missing = ignore_missing
+        if self.ignore_missing:
+            self.qfunc = numpy.nanquantile
+        else:
+            self.qfunc = numpy.quantile
+
+        self.return_missing_as = return_missing_as
+        if isinstance(self.return_missing_as, tuple):
+            self.null = self.return_missing_as[0]
+        else:
+            self.null = self.return_missing_as
+
+    def get_initial_regions(self, cube):
+        """Return empty NumPy arrays to fill."""
+        shape = cube.shape + self.shape
+        if not shape:
+            shape = (1,)
+        qs = numpy.full(shape, self.null, dtype=float)
+        return (qs,)
+
+    def fill(self, coordinates, regions):
+        """Fill the `regions` arrays with distributions contingent on coordinates.
+
+        The given `regions` are assumed to be part of a (possibly larger) cube,
+        one which has already been initialized (including any corner values).
+        We will compute its common cells from the margins later in self.reduce.
+        """
+        (qs,) = self.flat_regions(regions)
+
+        if self.weights is None:
+            if coordinates is None:
+                qs[:] = self.qfunc(self.arr, self.probability, axis=0)
+            else:
+                for i, rowmask in self.bins(coordinates):
+                    qs[i] = self.qfunc(self.arr[rowmask], self.probability, axis=0)
+        else:
+            if coordinates is None:
+                qs[:] = self.weighted_quantile(self.arr, self.probability, self.weights)
+            else:
+                for i, rowmask in self.bins(coordinates):
+                    if self.weights.shape:
+                        w = self.weights[rowmask]
+                    else:
+                        w = numpy.repeat(self.weights, len(rowmask))
+                    qs[i] = self.weighted_quantile(
+                        self.arr[rowmask], self.probability, w
+                    )
+
+    def weighted_quantile(self, arr, probability, weights):
+        def weighted_quantile_1d(a):
+            w = weights
+
+            ind = a.argsort()
+            a = a[ind]
+            w = w[ind]
+
+            if self.ignore_missing:
+                missing = numpy.isnan(a) | numpy.isnan(w)
+                if numpy.any(missing):
+                    valid = ~missing
+                    a = a[valid]
+                    w = w[valid]
+
+            N = len(w)
+            if N == 0:
+                return NaN
+
+            cs = w.cumsum(axis=0)
+            prob = probability * cs[-1]
+            right = numpy.digitize(prob, cs)
+            left = (right - 1).clip(min=0)
+            xdiff = numpy.diff(a, append=[0], axis=0)
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                frac = (prob - cs[left]).clip(min=0) / w[right.clip(max=len(w) - 1)]
+                return a[left] + frac * xdiff[left]
+
+        return numpy.apply_along_axis(weighted_quantile_1d, 0, arr)
+
+    def reduce(self, cube, regions):
+        """Return `regions` reduced to proper output."""
+        (qs,) = regions
+        if isinstance(self.return_missing_as, tuple):
+            missings = numpy.isnan(qs)
+            qs[missings] = self.null
+            return qs, ~missings
+        else:
+            return qs
+
+
 class xfunc_op_base(xfunc):
     """Calculate self.op() of an array contingent on a cube.
 
