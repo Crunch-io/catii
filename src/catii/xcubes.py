@@ -36,6 +36,7 @@ class xcube:
     poolsize = 4
     debug = False
     check_interrupt = None
+    pool_class = multiprocessing.pool.ThreadPool
 
     def __init__(self, dims, interacting_shape=None):
         self.dims = [numpy.asarray(d) for d in dims]
@@ -210,7 +211,7 @@ class xcube:
                     bucket["start"] = start
 
         if self.parallel:
-            with closing(multiprocessing.pool.ThreadPool(self.poolsize)) as pool:
+            with closing(self.pool_class(self.poolsize)) as pool:
                 pool.map(fill_one_cube, self.product)
         else:
             # The only reason to _not_ multithread this is the extra overhead;
