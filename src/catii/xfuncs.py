@@ -257,6 +257,10 @@ class xfunc_count(xfunc):
                         "Cannot determine counts with no dimensions, weights, or N."
                     )
                 counts[:] = self.weights.sum()
+                if self.ignore_missing:
+                    valid_counts[:] = numpy.count_nonzero(self.validity, axis=0)
+                else:
+                    missing_counts[:] =  numpy.count_nonzero(~self.validity, axis=0)
             else:
                 size = counts.shape[0]
                 if self.weights.shape:
@@ -993,12 +997,11 @@ class xfunc_quantile(xfunc):
         self.shape = arr.shape[1:]
         self.size = numpy.prod(self.shape, 0)
 
-        if weights is None:
-            arr = arr.copy()
-        else:
+        if weights is not None:
             weights, weights_validity = as_separate_validity(weights)
             validity = (validity.T & weights_validity).T
 
+        arr = arr.copy()
         arr[~validity] = NaN
 
         self.arr = arr

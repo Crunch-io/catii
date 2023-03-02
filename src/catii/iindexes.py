@@ -673,7 +673,7 @@ class iindex(dict):
         for i, order in enumerate(orders, 1):
             if order is None:
                 new_shape.append(self.shape[i])
-            elif isinstance(order, int):
+            elif type(order) is int:
                 pass
             else:
                 new_shape.append(len(order))
@@ -688,7 +688,7 @@ class iindex(dict):
                 if order is None:
                     # Keep all slices for this axis.
                     new_coords.append(coord)
-                elif isinstance(order, int):
+                elif type(order) is int:
                     if coord == order:
                         # Keep this single slice for this axis
                         # (but drop the axis).
@@ -905,6 +905,9 @@ class iindex(dict):
         before updating.
         """
         for coords, rowids in other.items():
+            if rowids is None:
+                # Allow callers to .get(coords) without having to manage None
+                continue
             rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
             # Make a copy of other[coords] if coords not in self.
             self.set_if(coords, union(self.get(coords), rowids, copy_right=True))
@@ -921,6 +924,9 @@ class iindex(dict):
                 del self[coords]
 
         for coords, rowids in other.items():
+            if rowids is None:
+                # Allow callers to .get(coords) without having to manage None
+                continue
             rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
             self.set_if(coords, intersection(self.get(coords), rowids))
 
@@ -932,6 +938,9 @@ class iindex(dict):
         before updating.
         """
         for coords, rowids in other.items():
+            if rowids is None:
+                # Allow callers to .get(coords) without having to manage None
+                continue
             rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
             # There's no need to copy self[coords] when updating self.
             self.set_if(coords, difference(self.get(coords), rowids, copy=False))
