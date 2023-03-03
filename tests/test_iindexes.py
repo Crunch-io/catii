@@ -313,6 +313,10 @@ class TestTransformMethods:
             shape=(10, 4),
         )
 
+        assert idx.sliced(1).to_dict() == {
+            (1,): [2],
+            (3,): [0],
+        }
         assert idx.sliced([2, 0, 1]).to_dict() == {
             (1, 2): [2],
             (2, 1): [1, 2],
@@ -322,10 +326,19 @@ class TestTransformMethods:
             # (5, 3): [1],
         }
 
-        idx = iindex({(99, 0): [1, 3, 4], (88, 1): [1, 2, 4]}, common=0, shape=(5, 2),)
-
+        idx2 = iindex({(99, 0): [1, 3, 4], (88, 1): [1, 2, 4]}, common=0, shape=(5, 2),)
         # col 3 doesn't exist, so will be correctly ignored.
-        assert idx.sliced([0, 3]).to_dict() == {(99, 0): [1, 3, 4]}
+        assert idx2.sliced([0, 3]).to_dict() == {(99, 0): [1, 3, 4]}
+
+        idx3 = iindex(
+            {(1, 1, 1): [2], (2, 0, 1): [1, 2], (3, 1, 0): [0]},
+            common=0,
+            shape=(10, 4, 2),
+        )
+        assert idx3.sliced(None, 1).to_dict() == {
+            (1, 1): [2],
+            (2, 0): [1, 2],
+        }
 
     def test_sliced_multiaxis(self):
         idx = iindex(

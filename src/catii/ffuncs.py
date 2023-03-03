@@ -206,15 +206,16 @@ class ffunc_count(ffunc):
         if self.weights is None:
             return (counts,)
         else:
+            vcount = numpy.sum(self.validity, axis=0)
             if self.ignore_missing:
                 valid_counts = numpy.zeros(cube.working_shape, dtype=int)
-                valid_counts[cube.corner] = numpy.count_nonzero(self.validity, axis=0)
+                valid_counts[cube.corner] = vcount
                 return counts, valid_counts
             else:
                 missing_counts = numpy.zeros(cube.working_shape, dtype=int)
-                missing_counts[cube.corner] = numpy.count_nonzero(
-                    ~self.validity, axis=0
-                )
+                missing_counts[cube.corner] = (
+                    len(self.validity) if self.validity.shape else 1
+                ) - vcount
                 return counts, missing_counts
 
     def fill(self, cube, regions):
@@ -239,7 +240,7 @@ class ffunc_count(ffunc):
             def _fill(x_coords, x_rowids):
                 if self.weights.shape:
                     counts[x_coords] = self.weights[x_rowids].sum()
-                    vcount = numpy.count_nonzero(self.validity[x_rowids], axis=0)
+                    vcount = numpy.sum(self.validity[x_rowids], axis=0)
                     if self.ignore_missing:
                         valid_counts[x_coords] = vcount
                     else:
@@ -345,13 +346,16 @@ class ffunc_valid_count(ffunc):
         counts = numpy.zeros(shape, dtype=dtype)
         counts[cube.corner] = numpy.nansum(self.countables, axis=0)
 
+        vcount = numpy.sum(self.validity, axis=0)
         if self.ignore_missing:
             valid_counts = numpy.zeros(shape, dtype=dtype)
-            valid_counts[cube.corner] = numpy.count_nonzero(self.validity, axis=0)
+            valid_counts[cube.corner] = vcount
             return counts, valid_counts
         else:
             missing_counts = numpy.zeros(shape, dtype=int)
-            missing_counts[cube.corner] = numpy.count_nonzero(~self.validity, axis=0)
+            missing_counts[cube.corner] = (
+                len(self.validity) if self.validity.shape else 1
+            ) - vcount
             return counts, missing_counts
 
     def fill(self, cube, regions):
@@ -373,7 +377,8 @@ class ffunc_valid_count(ffunc):
             # them out again here.
             counts[x_coords] = numpy.sum(self.countables[x_rowids], axis=0)
 
-            vcount = numpy.count_nonzero(self.validity[x_rowids], axis=0)
+            # sum(bool array) is faster than count_nonzero(bool array)
+            vcount = numpy.sum(self.validity[x_rowids], axis=0)
             if self.ignore_missing:
                 valid_counts[x_coords] = vcount
             else:
@@ -461,13 +466,16 @@ class ffunc_sum(ffunc):
         sums = numpy.zeros(shape, dtype=dtype)
         sums[cube.corner] = numpy.nansum(self.summables, axis=0)
 
+        vcount = numpy.sum(self.validity, axis=0)
         if self.ignore_missing:
             valid_counts = numpy.zeros(shape, dtype=dtype)
-            valid_counts[cube.corner] = numpy.count_nonzero(self.validity, axis=0)
+            valid_counts[cube.corner] = vcount
             return sums, valid_counts
         else:
             missing_counts = numpy.zeros(shape, dtype=int)
-            missing_counts[cube.corner] = numpy.count_nonzero(~self.validity, axis=0)
+            missing_counts[cube.corner] = (
+                len(self.validity) if self.validity.shape else 1
+            ) - vcount
             return sums, missing_counts
 
     def fill(self, cube, regions):
@@ -489,7 +497,7 @@ class ffunc_sum(ffunc):
             # them out again here.
             sums[x_coords] = numpy.sum(self.summables[x_rowids], axis=0)
 
-            vcount = numpy.count_nonzero(self.validity[x_rowids], axis=0)
+            vcount = numpy.sum(self.validity[x_rowids], axis=0)
             if self.ignore_missing:
                 valid_counts[x_coords] = vcount
             else:
@@ -558,8 +566,9 @@ class ffunc_mean(ffunc):
             summables = (summables.T * weights).T
             countables = (validity.T * weights).T
 
-        summables[~validity] = 0
-        countables[~validity] = 0
+        invalid = ~validity
+        summables[invalid] = 0
+        countables[invalid] = 0
 
         self.summables = summables
         self.validity = validity
@@ -593,7 +602,7 @@ class ffunc_mean(ffunc):
             # Unlike valid_counts, which uses self.countables which is weighted,
             # this uses self.validity which is unweighted.
             missing_counts = numpy.zeros(shape, dtype=int)
-            missing_counts[cube.corner] = numpy.count_nonzero(~self.validity, axis=0)
+            missing_counts[cube.corner] = numpy.sum(~self.validity, axis=0)
             return sums, valid_counts, missing_counts
 
     def fill(self, cube, regions):
@@ -616,7 +625,7 @@ class ffunc_mean(ffunc):
             sums[x_coords] = numpy.nansum(self.summables[x_rowids], axis=0, dtype=float)
             valid_counts[x_coords] = numpy.sum(self.countables[x_rowids], axis=0)
             if not self.ignore_missing:
-                vcount = numpy.count_nonzero(self.validity[x_rowids], axis=0)
+                vcount = numpy.sum(self.validity[x_rowids], axis=0)
                 missing_counts[x_coords] = len(x_rowids) - vcount
 
         cube.walk(_fill)

@@ -29,29 +29,36 @@ class TestCubeProduct:
     def test_cube_product(self):
         idx1 = iindex({(1,): [0, 2, 7]}, 0, (8,))
         cube = ccube([idx1, idx1])
-        assert list(cube.product) == [(None, None)]
+        result = list(cube.product())
+        for subcube in result:
+            for dim in subcube:
+                dim["data"] = {k: v.tolist() for k, v in dim["data"].items()}
+        assert result == [
+            (
+                {"coords": (), "data": {(1,): [0, 2, 7]}},
+                {"coords": (), "data": {(1,): [0, 2, 7]}},
+            )
+        ]
 
         idx2 = iindex({(1, 0): [0, 2, 5], (1, 1): [3, 4]}, 0, (8, 2))
         cube = ccube([idx1, idx2])
-        assert list(cube.product) == [(None, (0,)), (None, (1,))]
-
-
-class TestCubeSubcube:
-    def test_cube_subcube(self):
-        idx1 = iindex({(1,): [0, 2, 7]}, 0, (8,))
-        cube = ccube([idx1, idx1])
-        cube = cube.subcube([(), ()])
-        assert cube.dims == [idx1, idx1]
-        assert cube.intersection_data_points == 0
-        assert cube.shape == (2, 2)
-
-        idx2 = iindex({(1, 0): [0, 2, 5], (1, 1): [3, 4]}, 0, (8, 2))
-        cube = ccube([idx1, idx2])
-        assert cube.shape == (2, 2, 2)
-        cube = cube.subcube([(), (1,)])
-        assert cube.dims == [idx1, idx2.sliced(1)]
-        assert cube.intersection_data_points == 0
-        assert cube.shape == (2, 2)
+        result = list(cube.product())
+        for subcube in result:
+            for dim in subcube:
+                dim["data"] = {
+                    k: v if isinstance(v, list) else v.tolist()
+                    for k, v in dim["data"].items()
+                }
+        assert result == [
+            (
+                {"coords": (), "data": {(1,): [0, 2, 7]}},
+                {"coords": (0,), "data": {(1,): [0, 2, 5]}},
+            ),
+            (
+                {"coords": (), "data": {(1,): [0, 2, 7]}},
+                {"coords": (1,), "data": {(1,): [3, 4]}},
+            ),
+        ]
 
 
 class TestCubeCalculate:

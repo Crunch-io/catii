@@ -29,6 +29,17 @@ def set_intersect_merge_np(const uint32[:] left_array, const uint32[:] right_arr
     cdef uint32 left, right
     cdef int left_len = left_array.shape[0]
     cdef int right_len = right_array.shape[0]
+    if left_len == 0 and right_len == 0:
+        return numpy.empty(0, dtype=numpy.uint32)
+
+    left_ptr = 0
+    right_ptr = 0
+    left = left_array[left_ptr]
+    right = right_array[right_ptr]
+
+    if (left > right_array[right_len - 1]) or (right > left_array[left_len - 1]):
+        # The two arrays do not overlap at all.
+        return numpy.empty(0, dtype=numpy.uint32)
 
     # Form a result array which we will fill with the set intersection results.
     # The output cannot be any longer than the smaller of the two input arrays,
@@ -40,41 +51,31 @@ def set_intersect_merge_np(const uint32[:] left_array, const uint32[:] right_arr
     cdef int result_len = 0
 
     with nogil:
-        if left_len > 0 and right_len > 0:
-            left_ptr = 0
-            right_ptr = 0
-            left = left_array[left_ptr]
-            right = right_array[right_ptr]
-
-            if (left > right_array[right_len - 1]) or (right > left_array[left_len - 1]):
-                # The two arrays do not overlap at all.
-                pass
+        while 1:
+            if left > right:
+                # Right value not present in left array.
+                right_ptr += 1
+                if right_ptr >= right_len:
+                    break
+                right = right_array[right_ptr]
+            elif right > left:
+                # Left value not present in right array.
+                left_ptr += 1
+                if left_ptr >= left_len:
+                    break
+                left = left_array[left_ptr]
             else:
-                while 1:
-                    if left > right:
-                        # Right value not present in left array.
-                        right_ptr += 1
-                        if right_ptr >= right_len:
-                            break
-                        right = right_array[right_ptr]
-                    elif right > left:
-                        # Left value not present in right array.
-                        left_ptr += 1
-                        if left_ptr >= left_len:
-                            break
-                        left = left_array[left_ptr]
-                    else:
-                        result_view[result_len] = left
-                        result_len += 1
+                result_view[result_len] = left
+                result_len += 1
 
-                        left_ptr += 1
-                        right_ptr += 1
-                        if left_ptr >= left_len:
-                            break
-                        if right_ptr >= right_len:
-                            break
-                        left = left_array[left_ptr]
-                        right = right_array[right_ptr]
+                left_ptr += 1
+                right_ptr += 1
+                if left_ptr >= left_len:
+                    break
+                if right_ptr >= right_len:
+                    break
+                left = left_array[left_ptr]
+                right = right_array[right_ptr]
 
     return result[:result_len]
 

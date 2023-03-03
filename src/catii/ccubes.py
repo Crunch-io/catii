@@ -64,20 +64,21 @@ class ccube:
     def _walk(self, dims, base_coords, base_set, func):
         # This method could be made smaller by moving the `if's` inside
         # the loops, but that actually becomes a performance issue when
-        # you're looping over tens of thousands of subvariables.
+        # you're looping over tens of thousands of subcubes.
         # Exploded like this can reduce completion time by 10%.
-        remaining_dims = dims[1:]
-        if remaining_dims:
+        if len(dims) > 1:
+            remaining_dims = dims[1:]
             if base_set is None:
                 # First dim, or the case where all higher dims have passed
                 # ((-1,), None) to mean "ignore this dim".
                 for coords, rowids in dims[0].items():
                     self._walk(remaining_dims, base_coords + coords, rowids, func)
             else:
+                self.intersection_data_points += len(base_set) * len(dims[0])
                 for coords, rowids in dims[0].items():
-                    self.intersection_data_points += len(base_set) + len(rowids)
+                    self.intersection_data_points += len(rowids)
                     rowids = set_intersect_merge_np(base_set, rowids)
-                    if rowids.shape[0]:
+                    if len(rowids):
                         self._walk(remaining_dims, base_coords + coords, rowids, func)
 
             # Margin
@@ -88,17 +89,18 @@ class ccube:
             # Any coordinate which is -1 targets the margin for that axis.
             if base_set is None:
                 for coords, rowids in dims[0].items():
-                    if rowids.shape[0]:
+                    if len(rowids):
                         func(base_coords + coords, rowids)
             else:
+                self.intersection_data_points += len(base_set) * len(dims[0])
                 for coords, rowids in dims[0].items():
-                    self.intersection_data_points += len(base_set) + len(rowids)
+                    self.intersection_data_points += len(rowids)
                     rowids = set_intersect_merge_np(base_set, rowids)
-                    if rowids.shape[0]:
+                    if len(rowids):
                         func(base_coords + coords, rowids)
 
                 # Margin
-                if base_set.shape[0]:
+                if len(base_set):
                     func(base_coords + (-1,), base_set)
 
     def walk(self, func):
@@ -208,55 +210,43 @@ class ccube:
 
     # ------------------------------- stacking ------------------------------- #
 
-    @property
     def product(self):
         """Cartesian product of coordinate dimensions.
 
-        This returns an iterable of slice coordinates: each one a distinct
-        combination describing 1-D slices from each dimension. For example,
-        if our dimensions are a 2-D iindex 'A' with 3 columns, then a 1-D
-        iindex 'B', then a 3-D iindex 'C' with 2 columns and an additional
-        axis of length 4, then this would generate:
+        This returns an iterable: each element yielded from it is a set of
+        1d "slices" from each dimension. For example, if our dimensions are
+          * a 2-D iindex 'A' with 3 columns, then
+          * a 1-D iindex 'B', then
+          * a 3-D iindex 'C' with 2 columns and an additional axis of length 4,
+        then this would generate:
 
-            (  # A     B     C
-                ((0,), None, (0, 0)),  # -> (A.sliced(0) x B x C.sliced(0, 0))
-                ((0,), None, (0, 1)),
-                ((0,), None, (0, 2)),
-                ((0,), None, (0, 3)),
-                ((0,), None, (1, 0)),
-                ((0,), None, (1, 1)),
-                ((0,), None, (1, 2)),
-                ...
-                ((2,), None, (1, 3)),
-                ((2,), None, (1, 4)),
-            )
+            [{"coords": (0,), "data": A.sliced(0)}, {"coords": (), "data": B}, {"coords": (0, 0), "data": C.sliced(0, 0)}]
+            [{"coords": (0,), "data": A.sliced(0)}, {"coords": (), "data": B}, {"coords": (0, 1), "data": C.sliced(0, 1)}]
+            [{"coords": (0,), "data": A.sliced(0)}, {"coords": (), "data": B}, {"coords": (0, 2), "data": C.sliced(0, 2)}]
+            [{"coords": (0,), "data": A.sliced(0)}, {"coords": (), "data": B}, {"coords": (0, 3), "data": C.sliced(0, 3)}]
+            [{"coords": (0,), "data": A.sliced(0)}, {"coords": (), "data": B}, {"coords": (1, 0), "data": C.sliced(1, 0)}]
+            [{"coords": (0,), "data": A.sliced(0)}, {"coords": (), "data": B}, {"coords": (1, 1), "data": C.sliced(1, 1)}]
+            [{"coords": (0,), "data": A.sliced(0)}, {"coords": (), "data": B}, {"coords": (1, 2), "data": C.sliced(1, 2)}]
+            ...
+            [{"coords": (2,), "data": A.sliced(2)}, {"coords": (), "data": B}, {"coords": (1, 3), "data": C.sliced(1, 3)}]
+            [{"coords": (2,), "data": A.sliced(2)}, {"coords": (), "data": B}, {"coords": (1, 4), "data": C.sliced(1, 4)}]
 
-        We can then calculate aggregates for each ccube and fill them.
-        If a dimension is already 1-D, like `B` in the above example,
-        None is inserted. Multiple multidimensional iindexes multiply
-        the number of ccubes. Indexes with more than one higher dimension
-        (like `C` in the above example) similarly multiply the number of ccubes.
+        We can then calculate aggregates for each subcube and fill them.
+        If a dimension is already 1-D, like `B` in the above example, it is
+        not sliced. Multiple multidimensional iindexes multiply the number
+        of subcubes. Indexes with more than one higher dimension (like `C`
+        in the above example) similarly multiply the number of subcubes.
 
         You may transpose the output afterward to match the desired order
         of dimensions.
         """
-        extents = []
-        for d in self.dims:
-            s = d.shape[1:]
-            if s:
-                extents.append(itertools.product(*[range(e) for e in s]))
-            else:
-                extents.append((None,))
-
-        return itertools.product(*extents)
-
-    def subcube(self, nested_coords):
-        return ccube(
-            [
-                dim if coords is None else dim.sliced(*coords)
-                for coords, dim in zip(nested_coords, self.dims)
-            ],
-            interacting_shape=self.interacting_shape,
+        # Wrap the (coords, slice) pairs in dicts so itertools.product
+        # doesn't try to cross their internals.
+        return itertools.product(
+            *[
+                ({"coords": c, "data": s} for c, s in dim.slices1d())
+                for dim in self.dims
+            ]
         )
 
     def calculate(self, funcs):
@@ -274,18 +264,21 @@ class ccube:
             # Collect tracing for each ffunc (possibly running concurrently).
             self._tracing[f] = {"elapsed": 0.0, "start": None, "count": 0}
 
-        def fill_one_cube(nested_coords):
+        def fill_one_cube(subcube_dims):
             if self.check_interrupt is not None:
                 self.check_interrupt()
 
-            subcube = self.subcube(nested_coords)
+            subcube = ccube(
+                [dim["data"] for dim in subcube_dims],
+                interacting_shape=self.interacting_shape,
+            )
+
+            subcube_coords = [dim["coords"] for dim in subcube_dims]
             if self.debug:
-                print("FILL SUBCUBE:", nested_coords)
+                print("FILL SUBCUBE:", subcube_coords)
             for func, regions in zip(funcs, results):
                 start = time.time()
-                flattened_slice = [
-                    e for coords in nested_coords if coords is not None for e in coords
-                ]
+                flattened_slice = [e for coords in subcube_coords for e in coords]
                 if flattened_slice:
                     # The coords, when concatenated together, define which region
                     # of the complete result array(s) should be filled in
@@ -308,14 +301,14 @@ class ccube:
 
         if self.parallel:
             with closing(multiprocessing.pool.ThreadPool(self.poolsize)) as pool:
-                pool.map(fill_one_cube, self.product)
+                pool.map(fill_one_cube, self.product())
         else:
             # The only reason to _not_ multithread this is the extra overhead;
             # for example, if there's only one region anyway, or there are a handful
             # but we expect each to be very fast because the number of rows
             # is small.
-            for nested_coords in self.product:
-                fill_one_cube(nested_coords)
+            for subcube_dims in self.product():
+                fill_one_cube(subcube_dims)
 
         output = [func.reduce(self, regions) for func, regions in zip(funcs, results)]
         if self.debug:

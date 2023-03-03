@@ -260,7 +260,7 @@ class xfunc_count(xfunc):
                 if self.ignore_missing:
                     valid_counts[:] = numpy.count_nonzero(self.validity, axis=0)
                 else:
-                    missing_counts[:] =  numpy.count_nonzero(~self.validity, axis=0)
+                    missing_counts[:] = numpy.count_nonzero(~self.validity, axis=0)
             else:
                 size = counts.shape[0]
                 if self.weights.shape:
