@@ -104,10 +104,13 @@ class xcube:
 
     def strided_dims(self):
         """Return self.dims, multiplied by their stride for interacting."""
-        return [
-            dim.astype(self.mintype) if m == 1 else dim.astype(self.mintype) * m
-            for m, dim in zip(self.multipliers, self.dims)
-        ]
+        sds = []
+        for m, dim in zip(self.multipliers, self.dims):
+            sd = dim.astype(self.mintype)
+            if m != 1:
+                sd = sd * m
+            sds.append(sd)
+        return sds
 
     # ------------------------------- stacking ------------------------------- #
 

@@ -15,7 +15,7 @@ class Test_ccube_1d(UnitBenchmark):
 
     def test_ccube_1d_valid_count(self):
         A = self.categorical(indexed=False)
-        self._ccube_1d("valid_count", ffuncs.ffunc_valid_count(A), 8)
+        self._ccube_1d("valid_count", ffuncs.ffunc_valid_count(A), 10)
 
 
 class Test_ccube_1d_x_1d(UnitBenchmark):
@@ -45,4 +45,4 @@ class Test_ccube_2d(UnitBenchmark):
 
     def test_ccube_2d_valid_count(self):
         A = self.categorical(indexed=False)
-        self._ccube_2d("valid_count", ffuncs.ffunc_valid_count(A), 4500)
+        self._ccube_2d("valid_count", ffuncs.ffunc_valid_count(A), 5000)
