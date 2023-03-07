@@ -4,6 +4,7 @@ import numpy
 import pytest
 
 from catii import iindex
+from catii.iindexes import column_stack
 
 
 def pytest_raises(exctype, match=None, msg=None):
@@ -679,3 +680,84 @@ class TestUpdate:
             }
         )
         assert idx == iindex({(3,): [5], (99,): [1, 3]}, common=0, shape=(6,))
+
+
+class TestColumnStack:
+    def test_column_stack_1d(self):
+        idx0 = iindex({(99,): [1, 3], (88,): [2, 4]}, 0, (5,))
+        idx1 = iindex({(99,): [2], (88,): [0, 4]}, 0, (5,))
+        assert column_stack((idx0, idx1)) == iindex(
+            {(88, 0): [2, 4], (99, 0): [1, 3], (88, 1): [0, 4], (99, 1): [2],},
+            0,
+            (5, 2),
+        )
+
+        assert numpy.array_equal(
+            column_stack((idx0, idx1)).to_array(),
+            numpy.column_stack((idx0.to_array(), idx1.to_array())),
+        )
+
+    def test_column_stack_2d(self):
+        idx0 = iindex({(99, 0): [1, 3, 4], (88, 1): [1, 2, 4]}, 0, (5, 2))
+        idx1 = iindex({(99, 1): [2], (88, 0): [0, 4]}, 0, (5, 2))
+        assert column_stack((idx0, idx1)) == iindex(
+            {
+                # idx0 -> columns 0 and 1
+                (99, 0): [1, 3, 4],
+                (88, 1): [1, 2, 4],
+                # idx1 -> columns 2 and 3
+                (88, 2): [0, 4],
+                (99, 3): [2],
+            },
+            0,
+            (5, 4),
+        )
+
+        assert numpy.array_equal(
+            column_stack((idx0, idx1)).to_array(),
+            numpy.column_stack((idx0.to_array(), idx1.to_array())),
+        )
+
+    def test_column_stack_1d_different_commons(self):
+        idx0 = iindex({(99,): [1, 3], (88,): [2, 4]}, 0, (5,))
+        idx1 = iindex({(99,): [0], (88,): [0, 4]}, 2, (5,))
+        # Value `2` is chosen as the new common value because it is more common.
+        assert column_stack((idx0, idx1)) == iindex(
+            {
+                (0, 0): [0],
+                (88, 0): [2, 4],
+                (99, 0): [1, 3],
+                (88, 1): [0, 4],
+                (99, 1): [0],
+            },
+            2,
+            (5, 2),
+        )
+
+        assert numpy.array_equal(
+            column_stack((idx0, idx1)).to_array(),
+            numpy.column_stack((idx0.to_array(), idx1.to_array())),
+        )
+
+    def test_column_stack_2d_different_commons(self):
+        idx0 = iindex({(99, 0): [1, 3, 4], (88, 1): [1, 2, 4]}, 0, (5, 2))
+        idx1 = iindex({(99, 1): [2], (88, 0): [0, 4]}, 2, (5, 2))
+        assert column_stack((idx0, idx1)) == iindex(
+            {
+                # idx0 -> columns 0 and 1
+                (0, 0): [0, 2],
+                (99, 0): [1, 3, 4],
+                (0, 1): [0, 3],
+                (88, 1): [1, 2, 4],
+                # idx1 -> columns 2 and 3
+                (88, 2): [0, 4],
+                (99, 3): [2],
+            },
+            2,
+            (5, 4),
+        )
+
+        assert numpy.array_equal(
+            column_stack((idx0, idx1)).to_array(),
+            numpy.column_stack((idx0.to_array(), idx1.to_array())),
+        )

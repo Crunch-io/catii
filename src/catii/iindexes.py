@@ -945,3 +945,53 @@ class iindex(dict):
             rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
             # There's no need to copy self[coords] when updating self.
             self.set_if(coords, difference(self.get(coords), rowids, copy=False))
+
+
+def column_stack(iindexes, new_common=None, copy=False):
+    """Stack 1- or 2-D iindexes as columns into a 2-D iindex.
+
+    If `new_common` is provided, the returned index will have that common value;
+    otherwise, the "most common" value will be determined automatically.
+    Any input indexes are shifted to use the new common value (which can
+    be expensive).
+
+    If `copy` is False (the default), the rowids in the returned entries are
+    shared with the given iindexes. If True, they are materialized copies,
+    which can be expensive.
+    """
+    if any(len(ii.shape) for ii in iindexes) > 2:
+        raise ValueError("Cannot column_stack 3-D or higher indexes.")
+    if len({ii.shape[0] for ii in iindexes}) > 1:
+        raise ValueError("Cannot column_stack indexes with different number of rows.")
+
+    if new_common is None:
+        sparsities = defaultdict(int)
+        for ii in iindexes:
+            sparsities[ii.common] += ii.sparsity * (
+                ii.shape[1] if len(ii.shape) > 1 else 1
+            )
+        sparsities = [(s, c) for c, s in sparsities.items()]
+        sparsities.sort()
+        new_common = sparsities[-1][1]
+
+    entries = {}
+    i = 0
+    for ii in iindexes:
+        if ii.common != new_common:
+            ii = ii.copy()
+            ii.shift_common(new_common)
+
+        if len(ii.shape) > 1:
+            for coords, rowids in ii.items():
+                if copy:
+                    rowids = rowids.copy()
+                entries[(coords[0], coords[1] + i)] = rowids
+            i += ii.shape[1]
+        else:
+            for coords, rowids in ii.items():
+                if copy:
+                    rowids = rowids.copy()
+                entries[(coords[0], i)] = rowids
+            i += 1
+
+    return iindex(entries, new_common, (iindexes[0].shape[0], i))
