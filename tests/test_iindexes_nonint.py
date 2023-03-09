@@ -193,6 +193,13 @@ class TestReindexed:
         # ...and what had been the most common value is now explicit.
         assert reindexed.to_dict() == {("0",): [0, 7, 8, 9]}
 
+    def test_reindexed_auto_mapping(self):
+        idx = iindex({("99",): [1, 3, 5], ("88",): [2, 4, 6]}, common="0", shape=(10,))
+        assert idx.reindexed().to_dict() == {
+            (0,): [2, 4, 6],
+            (1,): [1, 3, 5],
+        }
+
 
 class TestTransformMethods:
     def test_filtered(self):

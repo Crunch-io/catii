@@ -708,7 +708,7 @@ class iindex(dict):
 
         return iindex(new_entries, self.common, new_shape)
 
-    def reindexed(self, mapping, copy=True, shift=True, assume_unique=False):
+    def reindexed(self, mapping=None, copy=True, shift=True, assume_unique=False):
         """Return a new iindex, whose entries contain mapped values.
 
         The mapping may map multiple inputs to the same output; matching
@@ -721,6 +721,9 @@ class iindex(dict):
         Use False only when self is already a temporary copy, or will not
         be persisted.
         """
+        if mapping is None:
+            mapping = {k: i for i, k in enumerate(sorted(k[0] for k in self))}
+
         new_common = mapping.get(self.common, self.common)
 
         merged = False
