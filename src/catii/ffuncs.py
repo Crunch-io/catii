@@ -346,17 +346,25 @@ class ffunc_valid_count(ffunc):
         counts = numpy.zeros(shape, dtype=dtype)
         counts[cube.corner] = numpy.nansum(self.countables, axis=0)
 
-        vcount = numpy.sum(self.validity, axis=0)
-        if self.ignore_missing:
-            valid_counts = numpy.zeros(shape, dtype=dtype)
-            valid_counts[cube.corner] = vcount
-            return counts, valid_counts
+        if self.return_missing_as == 0:
+            # We can take a shortcut here and do half the math, because
+            # missingness is going to be returned in the same format as
+            # not-missing-but-0. We cannot do the same for the case when
+            # return_missing_as=NaN, because that would mean pre-filling our
+            # counts with NaN, which would screw up marginal differencing.
+            return (counts,)
         else:
-            missing_counts = numpy.zeros(shape, dtype=int)
-            missing_counts[cube.corner] = (
-                len(self.validity) if self.validity.shape else 1
-            ) - vcount
-            return counts, missing_counts
+            vcount = numpy.sum(self.validity, axis=0)
+            if self.ignore_missing:
+                valid_counts = numpy.zeros(shape, dtype=dtype)
+                valid_counts[cube.corner] = vcount
+                return counts, valid_counts
+            else:
+                missing_counts = numpy.zeros(shape, dtype=int)
+                missing_counts[cube.corner] = (
+                    len(self.validity) if self.validity.shape else 1
+                ) - vcount
+                return counts, missing_counts
 
     def fill(self, cube, regions):
         """Fill the `regions` arrays with distributions contingent on cube.dims.
@@ -365,10 +373,13 @@ class ffunc_valid_count(ffunc):
         one which has already been initialized (including any corner values).
         We will compute its common cells from the margins later in self.reduce.
         """
-        if self.ignore_missing:
-            counts, valid_counts = regions
+        if self.return_missing_as == 0:
+            (counts,) = regions
         else:
-            counts, missing_counts = regions
+            if self.ignore_missing:
+                counts, valid_counts = regions
+            else:
+                counts, missing_counts = regions
 
         def _fill(x_coords, x_rowids):
             # This can be called millions of times, so it's critical
@@ -377,26 +388,34 @@ class ffunc_valid_count(ffunc):
             # them out again here.
             counts[x_coords] = numpy.sum(self.countables[x_rowids], axis=0)
 
-            # sum(bool array) is faster than count_nonzero(bool array)
-            vcount = numpy.sum(self.validity[x_rowids], axis=0)
-            if self.ignore_missing:
-                valid_counts[x_coords] = vcount
+            if self.return_missing_as == 0:
+                pass
             else:
-                missing_counts[x_coords] = len(x_rowids) - vcount
+                # sum(bool array) is faster than count_nonzero(bool array)
+                vcount = numpy.sum(self.validity[x_rowids], axis=0)
+                if self.ignore_missing:
+                    valid_counts[x_coords] = vcount
+                else:
+                    missing_counts[x_coords] = len(x_rowids) - vcount
 
         cube.walk(_fill)
 
     def reduce(self, cube, regions):
         """Return `regions` with common cells calculated and margins removed."""
-        if self.ignore_missing:
-            counts, valid_counts = regions
+        if self.return_missing_as == 0:
+            (counts,) = regions
         else:
-            counts, missing_counts = regions
+            if self.ignore_missing:
+                counts, valid_counts = regions
+            else:
+                counts, missing_counts = regions
 
         cube._compute_common_cells_from_marginal_diffs(counts)
         counts = counts[cube.marginless]
 
-        if self.ignore_missing:
+        if self.return_missing_as == 0:
+            counts = self.adjust_zeros(counts, self.null)
+        elif self.ignore_missing:
             cube._compute_common_cells_from_marginal_diffs(valid_counts)
             valid_counts = valid_counts[cube.marginless]
             counts = self.adjust_zeros(counts, self.null, condition=valid_counts == 0)

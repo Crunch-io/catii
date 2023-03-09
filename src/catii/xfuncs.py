@@ -370,12 +370,20 @@ class xfunc_valid_count(xfunc):
             shape = (1,)
         counts = numpy.zeros(shape, dtype=dtype)
 
-        if self.ignore_missing:
-            valid_counts = numpy.zeros(shape, dtype=int)
-            return counts, valid_counts
+        if self.return_missing_as == 0:
+            # We can take a shortcut here and do half the math, because
+            # missingness is going to be returned in the same format as
+            # not-missing-but-0. We cannot do the same for the case when
+            # return_missing_as=NaN, because that would mean pre-filling our
+            # counts with NaN, which would screw up marginal differencing.
+            return (counts,)
         else:
-            missing_counts = numpy.zeros(shape, dtype=int)
-            return counts, missing_counts
+            if self.ignore_missing:
+                valid_counts = numpy.zeros(shape, dtype=int)
+                return counts, valid_counts
+            else:
+                missing_counts = numpy.zeros(shape, dtype=int)
+                return counts, missing_counts
 
     def fill(self, coordinates, regions):
         """Fill the `regions` arrays with distributions contingent on coordinates.
@@ -387,10 +395,13 @@ class xfunc_valid_count(xfunc):
         # Flatten our regions so flat bincount output can overwrite it in place.
         regions = self.flat_regions(regions)
 
-        if self.ignore_missing:
-            counts, valid_counts = regions
+        if self.return_missing_as == 0:
+            (counts,) = regions
         else:
-            counts, missing_counts = regions
+            if self.ignore_missing:
+                counts, valid_counts = regions
+            else:
+                counts, missing_counts = regions
 
         # This can be called thousands of times, so it's critical
         # to perform as few passes over the data as possible.
@@ -398,48 +409,66 @@ class xfunc_valid_count(xfunc):
         # no need to filter them out again here.
         if coordinates is None:
             counts[:] = numpy.nansum(self.countables, axis=0)
-            if self.ignore_missing:
-                valid_counts[:] = numpy.count_nonzero(self.validity, axis=0)
+            if self.return_missing_as == 0:
+                pass
             else:
-                missing_counts[:] = numpy.count_nonzero(~self.validity, axis=0)
+                if self.ignore_missing:
+                    valid_counts[:] = numpy.count_nonzero(self.validity, axis=0)
+                else:
+                    missing_counts[:] = numpy.count_nonzero(~self.validity, axis=0)
         else:
             size = counts.shape[0]
             if self.countables.ndim == 1:
                 counts[:] = numpy.bincount(
                     coordinates, weights=self.countables, minlength=size
                 )
-                if self.ignore_missing:
-                    valid_counts[:] = numpy.bincount(
-                        coordinates, weights=self.validity, minlength=size
-                    )
+                if self.return_missing_as == 0:
+                    pass
                 else:
-                    missing_counts[:] = numpy.bincount(
-                        coordinates, weights=~self.validity, minlength=size
-                    )
+                    if self.ignore_missing:
+                        valid_counts[:] = numpy.bincount(
+                            coordinates, weights=self.validity, minlength=size
+                        )
+                    else:
+                        missing_counts[:] = numpy.bincount(
+                            coordinates, weights=~self.validity, minlength=size
+                        )
             elif self.countables.ndim == 2:
-                for i, ss in enumerate(self.countables.T):
-                    counts[:, i] = numpy.bincount(
-                        coordinates, weights=ss, minlength=size
-                    )
-                if self.ignore_missing:
-                    for i, cs in enumerate(self.validity.T):
-                        valid_counts[:, i] = numpy.bincount(
-                            coordinates, weights=cs, minlength=size
-                        )
-                else:
-                    for i, cs in enumerate(~self.validity.T):
-                        missing_counts[:, i] = numpy.bincount(
-                            coordinates, weights=cs, minlength=size
-                        )
+                # bins() is almost always faster than a bincount of each column.
+                # The exceptions are when the number of columns is low; for example,
+                # bincount is faster over 100,000 rows when the number of columns
+                # is less than about 8. However, the difference is small, ~4ms,
+                # whereas at 100 columns, bins() beats bincount() by ~80ms.
+                for i, rowmask in self.bins(coordinates):
+                    counts[i] = numpy.sum(self.countables[rowmask], axis=0)
+
+                    if self.return_missing_as == 0:
+                        pass
+                    else:
+                        valid_segment = self.validity[rowmask]
+                        if self.ignore_missing:
+                            valid_counts[i] = numpy.sum(valid_segment, axis=0)
+                        else:
+                            missing_counts[i] = len(valid_segment) - numpy.sum(
+                                valid_segment, axis=0
+                            )
 
     def reduce(self, cube, regions):
         """Return `regions` reduced to proper output."""
-        if self.ignore_missing:
-            counts, valid_counts = regions
-            counts = self.adjust_zeros(counts, self.null, condition=valid_counts == 0)
+        if self.return_missing_as == 0:
+            (counts,) = regions
+            counts = self.adjust_zeros(counts, self.null)
         else:
-            counts, missing_counts = regions
-            counts = self.adjust_zeros(counts, self.null, condition=missing_counts != 0)
+            if self.ignore_missing:
+                counts, valid_counts = regions
+                counts = self.adjust_zeros(
+                    counts, self.null, condition=valid_counts == 0
+                )
+            else:
+                counts, missing_counts = regions
+                counts = self.adjust_zeros(
+                    counts, self.null, condition=missing_counts != 0
+                )
 
         if isinstance(self.return_missing_as, tuple):
             if self.ignore_missing:
@@ -553,17 +582,20 @@ class xfunc_sum(xfunc):
                         coordinates, weights=~self.validity, minlength=size
                     )
             elif self.summables.ndim == 2:
-                for i, ss in enumerate(self.summables.T):
-                    sums[:, i] = numpy.bincount(coordinates, weights=ss, minlength=size)
-                if self.ignore_missing:
-                    for i, cs in enumerate(self.validity.T):
-                        valid_counts[:, i] = numpy.bincount(
-                            coordinates, weights=cs, minlength=size
-                        )
-                else:
-                    for i, cs in enumerate(~self.validity.T):
-                        missing_counts[:, i] = numpy.bincount(
-                            coordinates, weights=cs, minlength=size
+                # bins() is almost always faster than a bincount of each column.
+                # The exceptions are when the number of columns is low; for example,
+                # bincount is faster over 100,000 rows when the number of columns
+                # is less than about 8. However, the difference is small, ~4ms,
+                # whereas at 100 columns, bins() beats bincount() by ~80ms.
+                for i, rowmask in self.bins(coordinates):
+                    sums[i] = numpy.sum(self.summables[rowmask], axis=0)
+
+                    valid_segment = self.validity[rowmask]
+                    if self.ignore_missing:
+                        valid_counts[i] = numpy.sum(valid_segment, axis=0)
+                    else:
+                        missing_counts[i] = len(valid_segment) - numpy.sum(
+                            valid_segment, axis=0
                         )
 
     def reduce(self, cube, regions):
@@ -686,17 +718,23 @@ class xfunc_mean(xfunc):
                 valid_counts[:] = numpy.bincount(
                     coordinates, weights=self.countables, minlength=size
                 )
-            elif self.summables.ndim == 2:
-                for i, ss in enumerate(self.summables.T):
-                    sums[:, i] = numpy.bincount(coordinates, weights=ss, minlength=size)
-                for i, cs in enumerate(self.countables.T):
-                    valid_counts[:, i] = numpy.bincount(
-                        coordinates, weights=cs, minlength=size
+                if not self.ignore_missing:
+                    missing_counts[:] = numpy.bincount(
+                        coordinates, weights=~self.validity, minlength=size
                     )
-            if not self.ignore_missing:
-                missing_counts[:] = numpy.bincount(
-                    coordinates, weights=~self.validity, minlength=size
-                )
+            elif self.summables.ndim == 2:
+                # bins() is almost always faster than a bincount of each column.
+                # The exceptions are when the number of columns is low; for example,
+                # bincount is faster over 100,000 rows when the number of columns
+                # is less than about 8. However, the difference is small, ~4ms,
+                # whereas at 100 columns, bins() beats bincount() by ~80ms.
+                for i, rowmask in self.bins(coordinates):
+                    sums[i] = numpy.sum(self.summables[rowmask], axis=0)
+
+                    valid_segment = self.countables[rowmask]
+                    valid_counts[i] = numpy.sum(valid_segment, axis=0)
+                    if not self.ignore_missing:
+                        missing_counts[i] = len(valid_segment) - valid_counts[i]
 
     def reduce(self, cube, regions):
         """Return `regions` reduced to proper output."""
