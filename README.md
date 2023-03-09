@@ -158,7 +158,7 @@ and stacks their output. For example, if instead of "party" we had a 2-D
 and 2=alternative) people like or dislike (0=missing, 1=like, 2=dislike),
 we would see an additional dimension in our cube output. The like/dislike
 axis would be distinct values and therefore the first coordinate in our
-iindex tuples. The genre axis would be placed in the second coordinates.
+iindex tuples. The genre axis would be placed in the second coordinate.
 
 ```#python
 >>> genre = iindex.from_array([
@@ -180,10 +180,10 @@ iindex(shape=(6, 3), common=0, entries={
 >>> ccube([genre]).count()
 array([[3, 1, 2],  # classical
        [3, 2, 1],  # pop
-       [3, 3, 0]]) # alternative
+       [3, 3, nan]]) # alternative
 ```
 
-The additional axes are always moved to be outermost (in reverse precedence),
+The additional axes are always moved to be outermost (in the same order),
 so the result above iterates over the genre axis first, and then more tightly
 over the missing/like/dislike values.
 
@@ -283,3 +283,22 @@ ccube.calculate instead and pass a list of ffuncs:
 
 This iterates over our educ and party dimensions once, and passes
 each distinct combination of coordinates to each ffunc.
+
+## The rectangular contingency cube (xcube) and frequency functions (xfuncs)
+
+If your dimension variables are NumPy arrays, it can be expensive to turn them
+into iindexes. Generally, this should be done at write time, so that reads,
+especially ccubes, can be fast. Sometimes, however, you don't have a choice,
+or a particular variable is so dense (over 75% or so) that it's actually
+smaller as a NumPy array. In addition, not every aggregate function is able
+to be implemented using the "marginal differencing" approach that ccubes use:
+standard deviations, for example, use square roots which are not reversible.
+
+The catii package provides an "xcube" object to fall back to when you cannot
+use iindexes as cube dimensions. The xcube works just like the ccube, but takes
+NumPy arrays as dimensions rather than iindexes. There are a set of "xfuncs"
+which correspond to, and extend, the set of "ffuncs" you would use with ccubes.
+In general, even when your dimensions are up to about 75% dense, a ccube/ffunc
+will outperform the same xcube/xfunc. But in many domains, the larger the data,
+the more sparse it is. Dimensions which are 90-99% sparse can be cubed in
+one or two orders of magnitude less time.

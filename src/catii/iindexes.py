@@ -716,6 +716,11 @@ class iindex(dict):
         there will be no duplicates (no merged coords for the same rowid),
         you can save some execution time by passing `assume_unique=True`.
 
+        If `mapping` is None, the existing initial coordinates are sorted,
+        and remapped to contiguous integers starting from zero. This can
+        be used to prepare an iindex that does not use contiguous integer
+        values to one that does in order to work with ccubes.
+
         If `copy` is True (the default), the rowids in the returned entries
         are materialized copies of self. If False, they are shared.
         Use False only when self is already a temporary copy, or will not
