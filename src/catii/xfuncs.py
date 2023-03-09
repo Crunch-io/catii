@@ -152,15 +152,19 @@ class xfunc:
         return arr
 
     @staticmethod
-    def bins(coordinates):
+    def bins(coordinates, size=None):
         """Yield a bin number and boolean row mask for each result cell."""
         # TODO: When the number of distinct values grows large, it might be
         # faster to use argsort and form N slices of the output (with
         # lengths found by bincount, then cumulative sum to find offsets)
         # rather than perform N (row_indexes == i) passes.
-        uniqs, row_indexes = numpy.unique(coordinates, return_inverse=True)
-        for i, u in enumerate(uniqs):
-            yield u, (row_indexes == i)
+        if size is None:
+            uniqs, row_indexes = numpy.unique(coordinates, return_inverse=True)
+            for i, u in enumerate(uniqs):
+                yield u, (row_indexes == i)
+        else:
+            for u in range(size):
+                yield u, (coordinates == u)
 
 
 class xfunc_count(xfunc):
@@ -439,7 +443,7 @@ class xfunc_valid_count(xfunc):
                 # bincount is faster over 100,000 rows when the number of columns
                 # is less than about 8. However, the difference is small, ~4ms,
                 # whereas at 100 columns, bins() beats bincount() by ~80ms.
-                for i, rowmask in self.bins(coordinates):
+                for i, rowmask in self.bins(coordinates, size):
                     counts[i] = numpy.sum(self.countables[rowmask], axis=0)
 
                     if self.return_missing_as == 0:
@@ -587,7 +591,7 @@ class xfunc_sum(xfunc):
                 # bincount is faster over 100,000 rows when the number of columns
                 # is less than about 8. However, the difference is small, ~4ms,
                 # whereas at 100 columns, bins() beats bincount() by ~80ms.
-                for i, rowmask in self.bins(coordinates):
+                for i, rowmask in self.bins(coordinates, size):
                     sums[i] = numpy.sum(self.summables[rowmask], axis=0)
 
                     valid_segment = self.validity[rowmask]
@@ -728,7 +732,7 @@ class xfunc_mean(xfunc):
                 # bincount is faster over 100,000 rows when the number of columns
                 # is less than about 8. However, the difference is small, ~4ms,
                 # whereas at 100 columns, bins() beats bincount() by ~80ms.
-                for i, rowmask in self.bins(coordinates):
+                for i, rowmask in self.bins(coordinates, size):
                     sums[i] = numpy.sum(self.summables[rowmask], axis=0)
 
                     valid_segment = self.countables[rowmask]
@@ -1081,17 +1085,18 @@ class xfunc_quantile(xfunc):
         """
         (qs,) = self.flat_regions(regions)
 
+        size = qs.shape[0]
         if self.weights is None:
             if coordinates is None:
                 qs[:] = self.qfunc(self.arr, self.probability, axis=0)
             else:
-                for i, rowmask in self.bins(coordinates):
+                for i, rowmask in self.bins(coordinates, size):
                     qs[i] = self.qfunc(self.arr[rowmask], self.probability, axis=0)
         else:
             if coordinates is None:
                 qs[:] = self.weighted_quantile(self.arr, self.probability, self.weights)
             else:
-                for i, rowmask in self.bins(coordinates):
+                for i, rowmask in self.bins(coordinates, size):
                     if self.weights.shape:
                         w = self.weights[rowmask]
                     else:
@@ -1345,7 +1350,8 @@ class xfunc_corrcoef(xfunc):
         else:
             if self.ignore_missing:
                 coordinates = coordinates[self.validity]
-            for i, rowmask in self.bins(coordinates):
+            size = corrcoefs.shape[0]
+            for i, rowmask in self.bins(coordinates, size):
                 corrcoefs[i] = numpy.corrcoef(arr[rowmask], rowvar=False)
 
     def reduce(self, cube, regions):
@@ -1446,7 +1452,8 @@ class xfunc_covariance(xfunc):
         else:
             if self.ignore_missing:
                 coordinates = coordinates[self.validity]
-            for i, rowmask in self.bins(coordinates):
+            size = covs.shape[0]
+            for i, rowmask in self.bins(coordinates, size):
                 if aweights is None:
                     w = None
                 else:
