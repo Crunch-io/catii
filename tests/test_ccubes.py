@@ -3,7 +3,7 @@ import numpy
 from catii import ccube, iindex
 from catii.ffuncs import ffunc_count, ffunc_sum
 
-from . import arr_eq
+from . import arr_eq, compare_ccube_to_xcube
 
 
 class TestCubeCreation:
@@ -16,8 +16,31 @@ class TestCubeCreation:
         assert cube.intersection_data_points == 0
         assert cube.shape == (2, 2)
 
+    def test_explicit_shape_arg(self):
+        idx1 = iindex({(1,): [0, 2, 7]}, 0, (8,))
+        idx2 = iindex({(1,): [0, 2, 5]}, 0, (8,))
+
+        cube = ccube([idx1, idx2], interacting_shape=(2, 2))
+        assert cube.dims == [idx1, idx2]
+        assert cube.shape == (2, 2)
+
+        cube = ccube([idx1, idx2], interacting_shape=(4, 3))
+        assert cube.dims == [idx1, idx2]
+        assert cube.shape == (4, 3)
+
+    def test_implicit_shape_arg(self):
+        # Construct indexes where the common value is the highest value,
+        # to make sure we are not only looking at index values to infer shape.
+        idx1 = iindex({(0,): [0, 2, 7]}, 2, (8,))
+        idx2 = iindex({(0,): [0, 2, 5]}, 3, (8,))
+        cube = ccube([idx1, idx2])
+
+        assert cube.dims == [idx1, idx2]
+        assert cube.shape == (3, 4)
+
 
 class TestCubeDimensions:
+    @compare_ccube_to_xcube
     def test_cube_1d_x_1d(self):
         idx1 = iindex({(1,): [0, 2, 7]}, 0, (8,))
         idx2 = iindex({(1,): [0, 2, 5]}, 0, (8,))

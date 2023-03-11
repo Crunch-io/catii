@@ -160,6 +160,14 @@ class xcube:
         """Return a tuple of aggregates, usually one NumPy array for each xfunc."""
         if self.debug:
             print("\nxcube.calculate(%s):" % (funcs,))
+            print(
+                "scaffold_shape:",
+                self.scaffold_shape,
+                "interacting_shape:",
+                self.interacting_shape,
+                "multipliers:",
+                self.multipliers,
+            )
         results = [func.get_initial_regions(self) for func in funcs]
         if self.debug:
             print("INITIAL REGIONS:")
@@ -170,7 +178,7 @@ class xcube:
 
         self._tracing = {}
         for f in funcs:
-            # Collect tracing for each ffunc (possibly running concurrently).
+            # Collect tracing for each xfunc (possibly running concurrently).
             self._tracing[f] = {"elapsed": 0.0, "start": None, "count": 0}
 
         def fill_one_cube(nested_coords):

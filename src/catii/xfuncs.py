@@ -247,6 +247,8 @@ class xfunc_count(xfunc):
                     )
                 counts[:] = self.N
             else:
+                # bincount is an order of magnitude faster than numpy.add.at
+                # like scipy.stats.contingency.crosstab uses.
                 counts[:] = numpy.bincount(coordinates, minlength=counts.shape[0])
         else:
             if self.ignore_missing:

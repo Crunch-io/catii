@@ -5,6 +5,8 @@ import time
 from contextlib import closing
 from functools import reduce
 
+import numpy
+
 from . import ffuncs
 from .set_operations import set_intersect_merge_np
 
@@ -35,6 +37,7 @@ class ccube:
     poolsize = 4
     debug = False
     check_interrupt = None
+    _compare_output_to_xcube_for_tests = False
 
     def __init__(self, dims, interacting_shape=None):
         self.dims = dims
@@ -46,7 +49,9 @@ class ccube:
             and (self.dims[0].shape[0] * self.num_regions) >= BIG_REGIONS
         )
         if interacting_shape is None:
-            interacting_shape = tuple(max(coords[0] for coords in d) + 1 for d in dims)
+            interacting_shape = tuple(
+                max([coords[0] for coords in d] + [d.common]) + 1 for d in dims
+            )
         self.interacting_shape = interacting_shape
         self.shape = self.scaffold_shape + self.interacting_shape
         self.working_shape = self.scaffold_shape + tuple(
@@ -253,6 +258,12 @@ class ccube:
         """Return a tuple of aggregates, usually one NumPy array for each ffunc."""
         if self.debug:
             print("\nccube.calculate(%s):" % (funcs,))
+            print(
+                "scaffold_shape:",
+                self.scaffold_shape,
+                "interacting_shape:",
+                self.interacting_shape,
+            )
         results = [func.get_initial_regions(self) for func in funcs]
         if self.debug:
             print("INITIAL REGIONS:")
@@ -342,9 +353,16 @@ class ccube:
         of booleans. Missing values will have 0 in the former and False in the
         latter.
         """
-        return self.calculate(
+        result = self.calculate(
             [ffuncs.ffunc_count(weights, N, ignore_missing, return_missing_as)]
         )[0]
+        if self._compare_output_to_xcube_for_tests:
+            from . import xcubes
+
+            xcube = xcubes.xcube([d.to_array() for d in self.dims])
+            xcube_result = xcube.count(weights, N, ignore_missing, return_missing_as)
+            assert numpy.allclose(result, xcube_result, equal_nan=True)
+        return result
 
     def valid_count(
         self, arr, weights=None, ignore_missing=False, return_missing_as=ffuncs.NaN
@@ -374,9 +392,18 @@ class ccube:
         and a second "validity" NumPy array of booleans. Missing values will have
         0 in the former and False in the latter.
         """
-        return self.calculate(
+        result = self.calculate(
             [ffuncs.ffunc_valid_count(arr, weights, ignore_missing, return_missing_as)]
         )[0]
+        if self._compare_output_to_xcube_for_tests:
+            from . import xcubes
+
+            xcube = xcubes.xcube([d.to_array() for d in self.dims])
+            xcube_result = xcube.valid_count(
+                arr, weights, ignore_missing, return_missing_as
+            )
+            assert numpy.allclose(result, xcube_result, equal_nan=True)
+        return result
 
     def sum(
         self, arr, weights=None, ignore_missing=False, return_missing_as=ffuncs.NaN
@@ -406,9 +433,16 @@ class ccube:
         and a second "validity" NumPy array of booleans. Missing values will have
         0 in the former and False in the latter.
         """
-        return self.calculate(
+        result = self.calculate(
             [ffuncs.ffunc_sum(arr, weights, ignore_missing, return_missing_as)]
         )[0]
+        if self._compare_output_to_xcube_for_tests:
+            from . import xcubes
+
+            xcube = xcubes.xcube([d.to_array() for d in self.dims])
+            xcube_result = xcube.sum(arr, weights, ignore_missing, return_missing_as)
+            assert numpy.allclose(result, xcube_result, equal_nan=True)
+        return result
 
     def mean(
         self, arr, weights=None, ignore_missing=False, return_missing_as=ffuncs.NaN
@@ -438,6 +472,13 @@ class ccube:
         and a second "validity" NumPy array of booleans. Missing values will have
         0 in the former and False in the latter.
         """
-        return self.calculate(
+        result = self.calculate(
             [ffuncs.ffunc_mean(arr, weights, ignore_missing, return_missing_as)]
         )[0]
+        if self._compare_output_to_xcube_for_tests:
+            from . import xcubes
+
+            xcube = xcubes.xcube([d.to_array() for d in self.dims])
+            xcube_result = xcube.mean(arr, weights, ignore_missing, return_missing_as)
+            assert numpy.allclose(result, xcube_result, equal_nan=True)
+        return result

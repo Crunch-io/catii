@@ -34,7 +34,7 @@ def gen_chart(
     #     (1, 2.5, 3, 1.2)
     # ]
 
-    print("Generating chart")
+    print("Generating '%s' chart" % title)
     sns.set(style="ticks")
     plot = sns.relplot(
         x=x,
@@ -67,4 +67,4 @@ def gen_chart(
     if redlineat1:
         plot.refline(y=1.0, color="red")
 
-    plot.savefig("plot-%s.png" % title.replace(":", "_"))
+    plot.savefig("plot-%s.png" % title.replace(" ", "-").replace(":", "_"))

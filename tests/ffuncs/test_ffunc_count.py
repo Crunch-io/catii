@@ -2,7 +2,7 @@ import numpy
 
 from catii import ccube, ffuncs, iindex
 
-from .. import arr_eq
+from .. import arr_eq, compare_ccube_to_xcube
 
 idx1 = iindex({(1,): [0, 2]}, 0, (5,))  # [1, 0, 1, 0, 0]
 idx2 = iindex({(1,): [0, 3]}, 0, (5,))  # [1, 0, 0, 1, 0]
@@ -89,6 +89,7 @@ class TestFfuncCountWorkflow:
 
 
 class TestFfuncCountWeights:
+    @compare_ccube_to_xcube
     def test_weights(self):
         counts = ccube([idx1]).count(weights=None)
         assert arr_eq(counts, [3, 2])
@@ -115,6 +116,7 @@ class TestFfuncCountWeights:
 
 
 class TestFfuncCountIgnoreMissing:
+    @compare_ccube_to_xcube
     def test_ignore_missing(self):
         # The cube of idx1 has rowids:
         # 0           1
@@ -149,6 +151,7 @@ class TestFfuncCountIgnoreMissing:
 
 
 class TestFfuncCountReturnMissingAs:
+    @compare_ccube_to_xcube
     def test_return_missing_as(self):
         counts = ccube([idx1]).count(weights=wt)
         assert arr_eq(counts, [float("nan"), (0.25 + 0.99)])

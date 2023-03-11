@@ -2,7 +2,7 @@ import numpy
 
 from catii import ccube, ffuncs, iindex
 
-from .. import arr_eq
+from .. import arr_eq, compare_ccube_to_xcube
 
 idx1 = iindex({(1,): [0, 2]}, 0, (5,))  # [1, 0, 1, 0, 0]
 idx2 = iindex({(1,): [0, 3]}, 0, (5,))  # [1, 0, 0, 1, 0]
@@ -130,6 +130,7 @@ class TestFfuncMeanWorkflow:
 
 
 class TestFfuncMeanIgnoreMissing:
+    @compare_ccube_to_xcube
     def test_ignore_missing(self):
         arr = [1.0, 2.0, float("nan"), 4.0, 5.0]
 
@@ -166,6 +167,7 @@ class TestFfuncMeanIgnoreMissing:
 
 
 class TestFfuncMeanReturnMissingAs:
+    @compare_ccube_to_xcube
     def test_return_missing_as(self):
         arr = [1.0, 2.0, float("nan"), 4.0, 5.0]
 
