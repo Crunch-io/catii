@@ -139,7 +139,6 @@ def gen_2d_index_vs_rect_cube_time_chart():
                         "seconds": elapsed,
                     }
                 )
-                # if R < 100000000 and  3, 10, None, 2, False, False)
                 elapsed = gen.run_one_xcube(R, C, D, S=None, IV=2)
                 points.append(
                     {
@@ -164,7 +163,46 @@ def gen_2d_index_vs_rect_cube_time_chart():
     )
 
 
+def gen_parallel_index_vs_rect_cube_time_chart():
+    points = []
+    C = 3
+    D = 5
+    for R in reversed((1000, 10000, 100000)):  # , 1000000, 10000000, 100000000)):
+        for S in (1, 50, 100, 150, 200):
+            elapsed = gen.run_one_ccube(R, C, D, S, IV=2, parallel=True)
+            points.append(
+                {
+                    "algorithm": "Index",
+                    "rows": R,
+                    "subvariables": S,
+                    "data points": (R // 100) * D,
+                    "seconds": elapsed,
+                }
+            )
+            elapsed = gen.run_one_xcube(R, C, D, S, IV=2, parallel=True)
+            points.append(
+                {
+                    "algorithm": "Rect",
+                    "rows": R,
+                    "subvariables": S,
+                    "data points": (R // 100) * D,
+                    "seconds": elapsed,
+                }
+            )
+    charts.gen_chart(
+        "2-D Index vs Rect cube time: parallel (extent: 3, density: 5%)",
+        points,
+        x="subvariables",
+        xscale="linear",
+        y="seconds",
+        yscale="log",
+        hue="algorithm",
+        style="rows",
+    )
+
+
 if __name__ == "__main__":
     gen_2d_rect_cube_time_chart()
     gen_2d_index_cube_time_chart()
     gen_2d_index_vs_rect_cube_time_chart()
+    gen_parallel_index_vs_rect_cube_time_chart()
