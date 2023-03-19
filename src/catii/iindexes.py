@@ -919,7 +919,9 @@ class iindex(dict):
                 continue
             rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
             # Make a copy of other[coords] if coords not in self.
-            self.set_if(coords, union(self.get(coords), rowids, copy_right=True))
+            self.set_if(
+                coords, union(self.get(coords), rowids, copy_right=True), copy=False
+            )
 
     def intersection_update(self, other):
         """Update self, keeping only elements found in it and other.
@@ -937,7 +939,7 @@ class iindex(dict):
                 # Allow callers to .get(coords) without having to manage None
                 continue
             rowids = numpy.asarray(rowids, dtype=self.rowid_dtype)
-            self.set_if(coords, intersection(self.get(coords), rowids))
+            self.set_if(coords, intersection(self.get(coords), rowids), copy=False)
 
     def difference_update(self, other):
         """Update self, removing elements found in others.
