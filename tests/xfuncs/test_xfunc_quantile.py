@@ -84,6 +84,11 @@ class TestXfuncQuantileWorkflow:
         self._test_unweighted_workflow(factvar)
         self._test_weighted_workflow(factvar)
 
+    def test_tuple_arr_integer_workflow(self):
+        factvar = ([1, 2, 3, 4, 5], [True, True, False, True, True])
+        self._test_unweighted_workflow(factvar)
+        self._test_weighted_workflow(factvar)
+
 
 class TestXfuncQuantileWeights:
     def test_weights(self):
