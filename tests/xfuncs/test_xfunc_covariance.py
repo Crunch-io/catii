@@ -200,27 +200,38 @@ class TestXfuncCovarianceIgnoreMissing:
         # 0           1
         # [1, 3, 5, 7]  [0, 2, 4, 6]
 
-        covs = xcube([arr1]).corrcoef(factvar)
+        covs = xcube([arr1]).covariance(factvar)
         assert arr_eq(
             covs,
             [
-                [[1.0, -1.0, 0.4], [-1.0, 1.0, -0.4], [0.4, -0.4, 1.0]],
+                [
+                    [6.66666667, -13.33333333, 1.33333333],
+                    [-13.33333333, 26.66666667, -2.66666667],
+                    [1.33333333, -2.66666667, 1.66666667],
+                ],
                 # Cell (1,) MUST have missings, because it had a missing input.
-                [[1.0, -0.99838144, NaN], [-0.99838144, 1.0, NaN], [NaN, NaN, NaN]],
+                [
+                    [6.66666667, -14.33333333, NaN],
+                    [-14.33333333, 30.91666667, NaN],
+                    [NaN, NaN, NaN],
+                ],
             ],
         )
-
-        covs = xcube([arr1]).corrcoef(factvar, ignore_missing=True)
+        covs = xcube([arr1]).covariance(factvar, ignore_missing=True)
         assert arr_eq(
             covs,
             [
-                [[1.0, -1.0, 0.4], [-1.0, 1.0, -0.4], [0.4, -0.4, 1.0]],
+                [
+                    [6.66666667, -13.33333333, 1.33333333],
+                    [-13.33333333, 26.66666667, -2.66666667],
+                    [1.33333333, -2.66666667, 1.66666667],
+                ],
                 # Cell (1,) MUST NOT have missings, because we ignored any rows
                 # with missings in the input, and it had at least one valid input.
                 [
-                    [1.0, -0.99794872, -0.98198051],
-                    [-0.99794872, 1.0, 0.99206453],
-                    [-0.98198051, 0.99206453, 1.0],
+                    [4.0, -9.0, -3.0],
+                    [-9.0, 20.33333333, 6.83333333],
+                    [-3.0, 6.83333333, 2.33333333],
                 ],
             ],
         )
@@ -233,39 +244,39 @@ class TestXfuncCovarianceIgnoreMissing:
         # r|
         # 1|1  [nan, 5.0]     [1.0, 7.0]
 
-        covs = xcube([arr1, arr2]).corrcoef(factvar)
+        covs = xcube([arr1, arr2]).covariance(factvar)
         expected = [
             [
                 [
-                    [1.0, -1.0, 0.32732684],
-                    [-1.0, 1.0, -0.32732684],
-                    [0.32732684, -0.32732684, 1.0],
+                    [9.333333333333332, -18.666666666666664, 1.0],
+                    [-18.666666666666664, 37.33333333333333, -2.0],
+                    [1.0, -2.0, 1.0],
                 ],
-                [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]],
+                [[NaN, NaN, NaN], [NaN, NaN, NaN], [NaN, NaN, NaN]],
             ],
             [
-                [[1.0, -1.0, -1.0], [-1.0, 1.0, 1.0], [-1.0, 1.0, 1.0]],
+                [[2.0, -4.0, -1.0], [-4.0, 8.0, 2.0], [-1.0, 2.0, 0.5]],
                 # Cell (1, 1) MUST have missings, because it had a missing input.
-                [[1.0, -1.0, NaN], [-1.0, 1.0, NaN], [NaN, NaN, NaN]],
+                [[18.0, -39.0, NaN], [-39.0, 84.5, NaN], [NaN, NaN, NaN]],
             ],
         ]
         assert arr_eq(covs, expected)
 
-        covs = xcube([arr1, arr2]).corrcoef(factvar, ignore_missing=True)
+        covs = xcube([arr1, arr2]).covariance(factvar, ignore_missing=True)
         expected = [
             [
                 [
-                    [1.0, -1.0, 0.32732684],
-                    [-1.0, 1.0, -0.32732684],
-                    [0.32732684, -0.32732684, 1.0],
+                    [9.333333333333332, -18.666666666666664, 1.0],
+                    [-18.666666666666664, 37.33333333333333, -2.0],
+                    [1.0, -2.0, 1.0],
                 ],
-                [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]],
+                [[NaN, NaN, NaN], [NaN, NaN, NaN], [NaN, NaN, NaN]],
             ],
             [
-                [[1.0, -1.0, -1.0], [-1.0, 1.0, 1.0], [-1.0, 1.0, 1.0]],
+                [[2.0, -4.0, -1.0], [-4.0, 8.0, 2.0], [-1.0, 2.0, 0.5]],
                 # Cell (1, 1) MUST NOT have missings, because we ignored any rows
                 # with missings in the input, and it had at least one valid input.
-                [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]],
+                [[NaN, NaN, NaN], [NaN, NaN, NaN], [NaN, NaN, NaN]],
             ],
         ]
 
@@ -283,23 +294,39 @@ class TestXfuncCovarianceReturnMissingAs:
             [-8, 16, 1],
         ]
 
-        covs = xcube([arr1]).corrcoef(factvar)
+        covs = xcube([arr1]).covariance(factvar)
         assert arr_eq(
             covs,
             [
-                [[1.0, -1.0, 0.4], [-1.0, 1.0, -0.4], [0.4, -0.4, 1.0]],
+                [
+                    [6.666666666666666, -13.333333333333332, 1.3333333333333333],
+                    [-13.333333333333332, 26.666666666666664, -2.6666666666666665],
+                    [1.3333333333333333, -2.6666666666666665, 1.6666666666666665],
+                ],
                 # Cell (1,) MUST have missings, because it had a missing input.
-                [[1.0, -0.99838144, NaN], [-0.99838144, 1.0, NaN], [NaN, NaN, NaN]],
+                [
+                    [6.666666666666666, -14.333333333333332, NaN],
+                    [-14.333333333333332, 30.916666666666664, NaN],
+                    [NaN, NaN, NaN],
+                ],
             ],
         )
 
-        covs, validity = xcube([arr1]).corrcoef(factvar, return_missing_as=(0, False))
+        covs, validity = xcube([arr1]).covariance(factvar, return_missing_as=(0, False))
         assert arr_eq(
             covs,
             [
-                [[1.0, -1.0, 0.4], [-1.0, 1.0, -0.4], [0.4, -0.4, 1.0]],
+                [
+                    [6.666666666666666, -13.333333333333332, 1.3333333333333333],
+                    [-13.333333333333332, 26.666666666666664, -2.6666666666666665],
+                    [1.3333333333333333, -2.6666666666666665, 1.6666666666666665],
+                ],
                 # Cell (1,) MUST have missings, because it had a missing input.
-                [[1.0, -0.99838144, 0.0], [-0.99838144, 1.0, 0.0], [0.0, 0.0, 0.0]],
+                [
+                    [6.666666666666666, -14.333333333333332, 0.0],
+                    [-14.333333333333332, 30.916666666666664, 0.0],
+                    [0.0, 0.0, 0.0],
+                ],
             ],
         )
         assert arr_eq(
@@ -308,5 +335,54 @@ class TestXfuncCovarianceReturnMissingAs:
                 [[True, True, True], [True, True, True], [True, True, True]],
                 # Cell (1,) MUST have missings, because it had a missing input.
                 [[True, True, False], [True, True, False], [False, False, False]],
+            ],
+        )
+
+
+class TestXfuncCovarianceEmptyCells:
+    def test_empty_cells(self):
+        # Use a dimension that has no entries for one of its values.
+        dim1 = [2, 0, 2, 0, 2, 0, 2, 0]
+        factvar = [
+            [-1, 1, 1],
+            [-2, 4, 2],
+            [-3, 6, 3],
+            [-4, 8, 4],
+            [-5, 10, 4],
+            [-6, 12, 3],
+            [-7, 14, NaN],
+            [-8, 16, 1],
+        ]
+
+        covs = xcube([dim1]).covariance(factvar)
+        assert arr_eq(
+            covs,
+            [
+                [
+                    [6.666666666666666, -13.333333333333332, 1.3333333333333333],
+                    [-13.333333333333332, 26.666666666666664, -2.6666666666666665],
+                    [1.3333333333333333, -2.6666666666666665, 1.6666666666666665],
+                ],
+                [[NaN, NaN, NaN], [NaN, NaN, NaN], [NaN, NaN, NaN]],
+                # Cell (2,) MUST have missings, because it had a missing input.
+                [
+                    [6.666666666666666, -14.333333333333332, NaN],
+                    [-14.333333333333332, 30.916666666666664, NaN],
+                    [NaN, NaN, NaN],
+                ],
+            ],
+        )
+
+        covs = xcube([dim1]).covariance(factvar, weights=wt)
+        assert arr_eq(
+            covs,
+            [
+                [
+                    [2.947368421052631, -5.894736842105262, -0.42105263157894735],
+                    [-5.894736842105262, 11.789473684210524, 0.8421052631578947],
+                    [-0.42105263157894735, 0.8421052631578947, 0.9736842105263156],
+                ],
+                [[NaN, NaN, NaN], [NaN, NaN, NaN], [NaN, NaN, NaN]],
+                [[NaN, NaN, NaN], [NaN, NaN, NaN], [NaN, NaN, NaN]],
             ],
         )

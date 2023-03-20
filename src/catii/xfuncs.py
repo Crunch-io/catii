@@ -1464,6 +1464,8 @@ class xfunc_covariance(xfunc):
                     w = None
                 else:
                     w = aweights[rowmask]
+                    if len(w) == 0:
+                        continue
                 covs[i] = numpy.cov(arr[rowmask].T, aweights=w)
 
     def reduce(self, cube, regions):
