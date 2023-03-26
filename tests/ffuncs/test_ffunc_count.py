@@ -33,21 +33,21 @@ class TestFfuncCountWorkflow:
         cube = ccube([])
         (counts,) = f.get_initial_regions(cube)
         assert counts.tolist() == 5
-        f.fill(cube, (counts,))
+        cube.walk(f.fill_func((counts,)))
         assert counts.tolist() == 5
         assert f.reduce(cube, (counts,)) == 5
 
         cube = ccube([idx1])
         (counts,) = f.get_initial_regions(cube)
         assert counts.tolist() == [0, 0, 5]
-        f.fill(cube, (counts,))
+        cube.walk(f.fill_func((counts,)))
         assert counts.tolist() == [0, 2, 5]
         assert arr_eq(f.reduce(cube, (counts,)), [3, 2])
 
         cube = ccube([idx1, idx2])
         (counts,) = f.get_initial_regions(cube)
         assert counts.tolist() == [[0, 0, 0], [0, 0, 0], [0, 0, 5]]
-        f.fill(cube, (counts,))
+        cube.walk(f.fill_func((counts,)))
         assert counts.tolist() == [[0, 0, 0], [0, 1, 2], [0, 2, 5]]
         assert arr_eq(f.reduce(cube, (counts,)), [[2, 1], [1, 1]])
 
@@ -68,7 +68,7 @@ class TestFfuncCountWorkflow:
             [0, 0, 0],
             [0, 0, 1],
         ]
-        f.fill(cube, (counts, missings))
+        cube.walk(f.fill_func((counts, missings)))
         assert counts.tolist() == [
             [0.0, 0.0, 0.0],
             [0.0, 0.25, (0.25 + 0.99)],

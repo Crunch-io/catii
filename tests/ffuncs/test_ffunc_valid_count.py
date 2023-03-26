@@ -35,7 +35,7 @@ class TestFfuncValidCountWorkflow:
         counts, missings = f.get_initial_regions(cube)
         assert counts.tolist() == 4
         assert missings.tolist() == 1
-        f.fill(cube, (counts, missings))
+        cube.walk(f.fill_func((counts, missings)))
         assert counts.tolist() == 4
         assert missings.tolist() == 1
         assert numpy.isnan(f.reduce(cube, (counts, missings)))
@@ -44,7 +44,7 @@ class TestFfuncValidCountWorkflow:
         counts, missings = f.get_initial_regions(cube)
         assert counts.tolist() == [0, 0, 4]
         assert missings.tolist() == [0, 0, 1]
-        f.fill(cube, (counts, missings))
+        cube.walk(f.fill_func((counts, missings)))
         assert counts.tolist() == [0, 1, 4]
         assert missings.tolist() == [0, 1, 1]
         assert arr_eq(f.reduce(cube, (counts, missings)), [3, float("nan")])
@@ -53,7 +53,7 @@ class TestFfuncValidCountWorkflow:
         counts, missings = f.get_initial_regions(cube)
         assert counts.tolist() == [[0, 0, 0], [0, 0, 0], [0, 0, 4]]
         assert missings.tolist() == [[0, 0, 0], [0, 0, 0], [0, 0, 1]]
-        f.fill(cube, (counts, missings))
+        cube.walk(f.fill_func((counts, missings)))
         assert counts.tolist() == [[0, 0, 0], [0, 1, 1], [0, 2, 4]]
         assert missings.tolist() == [[0, 0, 0], [0, 0, 1], [0, 0, 1]]
         assert arr_eq(f.reduce(cube, (counts, missings)), [[2, 1], [float("nan"), 1]])
@@ -77,7 +77,7 @@ class TestFfuncValidCountWorkflow:
             [0, 0, 0],
             [0, 0, 2],
         ]
-        f.fill(cube, (counts, missings))
+        cube.walk(f.fill_func((counts, missings)))
         assert counts.tolist() == [
             [0.0, 0.0, 0.0],
             [0.0, 0.25, 0.25],

@@ -50,6 +50,7 @@ replace NaN values in the `values` array with 0 in that case. If you prefer
 `sum([])` to return 0, for example, without a second "validity" array,
 pass `return_missing_as=0`.
 """
+import time
 
 import numpy
 
@@ -84,7 +85,7 @@ class ffunc:
         """Return NumPy arrays to fill, empty except for corner values."""
         raise NotImplementedError
 
-    def fill(self, cube, regions):
+    def fill_func(self, regions):
         """Fill the `regions` arrays with distributions contingent on cube.dims.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
@@ -157,7 +158,12 @@ class ffunc_count(ffunc):
     """
 
     def __init__(
-        self, weights=None, N=None, ignore_missing=False, return_missing_as=NaN
+        self,
+        weights=None,
+        N=None,
+        ignore_missing=False,
+        return_missing_as=NaN,
+        tracing=True,
     ):
         if weights is None:
             validity = None
@@ -175,9 +181,16 @@ class ffunc_count(ffunc):
         else:
             self.null = self.return_missing_as
         self.N = N
+        if tracing:
+            self.tracing = {"elapsed": 0.0, "start": None, "count": 0}
+        else:
+            self.tracing = None
 
     def get_initial_regions(self, cube):
         """Return NumPy arrays to fill, empty except for corner values."""
+        if self.tracing:
+            self.tracing["start"] = time.time()
+
         if self.N is not None:
             N = self.N
         elif cube.dims:
@@ -218,18 +231,29 @@ class ffunc_count(ffunc):
                 ) - vcount
                 return counts, missing_counts
 
-    def fill(self, cube, regions):
+    def fill_func(self, regions):
         """Fill the `regions` arrays with distributions contingent on cube.dims.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
         one which has already been initialized (including any corner values).
         We will compute its common cells from the margins later in self.reduce.
         """
+        tracing = self.tracing
         if self.weights is None:
             (counts,) = regions
 
-            def _fill(x_coords, x_rowids):
-                counts[x_coords] = len(x_rowids)
+            if tracing:
+
+                def _fill(x_coords, x_rowids):
+                    start = time.perf_counter()
+                    counts[x_coords] = len(x_rowids)
+                    tracing["elapsed"] += time.perf_counter() - start
+                    tracing["count"] += 1
+
+            else:
+
+                def _fill(x_coords, x_rowids):
+                    counts[x_coords] = len(x_rowids)
 
         else:
             if self.ignore_missing:
@@ -238,6 +262,8 @@ class ffunc_count(ffunc):
                 counts, missing_counts = regions
 
             def _fill(x_coords, x_rowids):
+                if tracing:
+                    start = time.perf_counter()
                 if self.weights.shape:
                     counts[x_coords] = self.weights[x_rowids].sum()
                     vcount = numpy.sum(self.validity[x_rowids], axis=0)
@@ -253,8 +279,11 @@ class ffunc_count(ffunc):
                         valid_counts[x_coords] = len_rowids if self.validity else 0
                     else:
                         missing_counts[x_coords] = 0 if self.validity else len_rowids
+                if tracing:
+                    tracing["elapsed"] += time.perf_counter() - start
+                    tracing["count"] += 1
 
-        cube.walk(_fill)
+        return _fill
 
     def reduce(self, cube, regions):
         """Return `regions` with common cells calculated and margins removed."""
@@ -315,7 +344,14 @@ class ffunc_valid_count(ffunc):
     0 in the former and False in the latter.
     """
 
-    def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
+    def __init__(
+        self,
+        arr,
+        weights=None,
+        ignore_missing=False,
+        return_missing_as=NaN,
+        tracing=True,
+    ):
         _, validity = as_separate_validity(arr)
 
         if weights is None:
@@ -336,6 +372,10 @@ class ffunc_valid_count(ffunc):
             self.null = self.return_missing_as[0]
         else:
             self.null = self.return_missing_as
+        if tracing:
+            self.tracing = {"elapsed": 0.0, "start": None, "count": 0}
+        else:
+            self.tracing = None
 
     def get_initial_regions(self, cube):
         """Return NumPy arrays to fill, empty except for corner values."""
@@ -366,13 +406,14 @@ class ffunc_valid_count(ffunc):
                 ) - vcount
                 return counts, missing_counts
 
-    def fill(self, cube, regions):
+    def fill_func(self, regions):
         """Fill the `regions` arrays with distributions contingent on cube.dims.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
         one which has already been initialized (including any corner values).
         We will compute its common cells from the margins later in self.reduce.
         """
+        tracing = self.tracing
         if self.return_missing_as == 0:
             (counts,) = regions
         else:
@@ -382,6 +423,9 @@ class ffunc_valid_count(ffunc):
                 counts, missing_counts = regions
 
         def _fill(x_coords, x_rowids):
+            if tracing:
+                start = time.perf_counter()
+
             # This can be called millions of times, so it's critical
             # to perform as few passes over the data as possible.
             # We set countables[~validity] = 0 so there's no need to filter
@@ -397,8 +441,11 @@ class ffunc_valid_count(ffunc):
                     valid_counts[x_coords] = vcount
                 else:
                     missing_counts[x_coords] = len(x_rowids) - vcount
+            if tracing:
+                tracing["elapsed"] += time.perf_counter() - start
+                tracing["count"] += 1
 
-        cube.walk(_fill)
+        return _fill
 
     def reduce(self, cube, regions):
         """Return `regions` with common cells calculated and margins removed."""
@@ -454,7 +501,14 @@ class ffunc_sum(ffunc):
     0 in the former and False in the latter.
     """
 
-    def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
+    def __init__(
+        self,
+        arr,
+        weights=None,
+        ignore_missing=False,
+        return_missing_as=NaN,
+        tracing=True,
+    ):
         summables, validity = as_separate_validity(arr)
 
         if weights is None:
@@ -475,6 +529,10 @@ class ffunc_sum(ffunc):
             self.null = self.return_missing_as[0]
         else:
             self.null = self.return_missing_as
+        if tracing:
+            self.tracing = {"elapsed": 0.0, "start": None, "count": 0}
+        else:
+            self.tracing = None
 
     def get_initial_regions(self, cube):
         """Return NumPy arrays to fill, empty except for corner values."""
@@ -497,19 +555,23 @@ class ffunc_sum(ffunc):
             ) - vcount
             return sums, missing_counts
 
-    def fill(self, cube, regions):
+    def fill_func(self, regions):
         """Fill the `regions` arrays with distributions contingent on cube.dims.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
         one which has already been initialized (including any corner values).
         We will compute its common cells from the margins later in self.reduce.
         """
+        tracing = self.tracing
         if self.ignore_missing:
             sums, valid_counts = regions
         else:
             sums, missing_counts = regions
 
         def _fill(x_coords, x_rowids):
+            if tracing:
+                start = time.perf_counter()
+
             # This can be called millions of times, so it's critical
             # to perform as few passes over the data as possible.
             # We set summables[~validity] = 0 so there's no need to filter
@@ -522,7 +584,11 @@ class ffunc_sum(ffunc):
             else:
                 missing_counts[x_coords] = len(x_rowids) - vcount
 
-        cube.walk(_fill)
+            if tracing:
+                tracing["elapsed"] += time.perf_counter() - start
+                tracing["count"] += 1
+
+        return _fill
 
     def reduce(self, cube, regions):
         """Return `regions` with common cells calculated and margins removed."""
@@ -573,7 +639,14 @@ class ffunc_mean(ffunc):
     0 in the former and False in the latter.
     """
 
-    def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
+    def __init__(
+        self,
+        arr,
+        weights=None,
+        ignore_missing=False,
+        return_missing_as=NaN,
+        tracing=True,
+    ):
         summables, validity = as_separate_validity(arr)
 
         if weights is None:
@@ -599,6 +672,10 @@ class ffunc_mean(ffunc):
             self.null = self.return_missing_as[0]
         else:
             self.null = self.return_missing_as
+        if tracing:
+            self.tracing = {"elapsed": 0.0, "start": None, "count": 0}
+        else:
+            self.tracing = None
 
     def get_initial_regions(self, cube):
         """Return NumPy arrays to fill, empty except for corner values."""
@@ -624,19 +701,23 @@ class ffunc_mean(ffunc):
             missing_counts[cube.corner] = numpy.sum(~self.validity, axis=0)
             return sums, valid_counts, missing_counts
 
-    def fill(self, cube, regions):
+    def fill_func(self, regions):
         """Fill the `regions` arrays with distributions contingent on cube.dims.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
         one which has already been initialized (including any corner values).
         We will compute its common cells from the margins later in self.reduce.
         """
+        tracing = self.tracing
         if self.ignore_missing:
             sums, valid_counts = regions
         else:
             sums, valid_counts, missing_counts = regions
 
         def _fill(x_coords, x_rowids):
+            if tracing:
+                start = time.perf_counter()
+
             # This can be called millions of times, so it's critical
             # to perform as few passes over the data as possible.
             # We set summables/countables[~validity] = 0 so there's
@@ -647,7 +728,11 @@ class ffunc_mean(ffunc):
                 vcount = numpy.sum(self.validity[x_rowids], axis=0)
                 missing_counts[x_coords] = len(x_rowids) - vcount
 
-        cube.walk(_fill)
+            if tracing:
+                tracing["elapsed"] += time.perf_counter() - start
+                tracing["count"] += 1
+
+        return _fill
 
     def reduce(self, cube, regions):
         """Return `regions` with common cells calculated and margins removed."""

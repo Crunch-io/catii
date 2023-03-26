@@ -73,3 +73,18 @@ class Test_ccube_2d(UnitBenchmark):
     def test_ccube_2d_valid_count(self):
         A = self.categorical(indexed=False)
         self._ccube_2d("valid_count", ffuncs.ffunc_valid_count(A), 5000)
+
+
+class Test_ccube_multiple_ffuncs(UnitBenchmark):
+    def test_ccube_multiple_ffuncs(self):
+        C = self.categorical()
+        cube = ccubes.ccube([C, C])
+        N = self.numeric()
+        fs = [
+            ffuncs.ffunc_count(),
+            ffuncs.ffunc_valid_count(N),
+            ffuncs.ffunc_sum(N),
+            ffuncs.ffunc_mean(N),
+        ]
+        with self.bench("ccube.multiple_ffuncs"):
+            cube.calculate(fs)

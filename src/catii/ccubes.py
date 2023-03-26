@@ -1,7 +1,6 @@
 import itertools
 import multiprocessing.pool
 import operator
-import time
 from contextlib import closing
 from functools import reduce
 
@@ -66,49 +65,52 @@ class ccube:
 
     # ----------------------------- interaction ----------------------------- #
 
-    def _walk(self, dims, base_coords, base_set, func):
+    def _walk(self, dims, base_coords, base_rowids, funcs):
         # This method could be made smaller by moving the `if's` inside
         # the loops, but that actually becomes a performance issue when
         # you're looping over tens of thousands of subcubes.
         # Exploded like this can reduce completion time by 10%.
         if len(dims) > 1:
             remaining_dims = dims[1:]
-            if base_set is None:
+            if base_rowids is None:
                 # First dim, or the case where all higher dims have passed
                 # ((-1,), None) to mean "ignore this dim".
                 for coords, rowids in dims[0].items():
-                    self._walk(remaining_dims, base_coords + coords, rowids, func)
+                    self._walk(remaining_dims, base_coords + coords, rowids, funcs)
             else:
-                self.intersection_data_points += len(base_set) * len(dims[0])
+                self.intersection_data_points += len(base_rowids) * len(dims[0])
                 for coords, rowids in dims[0].items():
                     self.intersection_data_points += len(rowids)
-                    rowids = set_intersect_merge_np(base_set, rowids)
+                    rowids = set_intersect_merge_np(base_rowids, rowids)
                     if len(rowids):
-                        self._walk(remaining_dims, base_coords + coords, rowids, func)
+                        self._walk(remaining_dims, base_coords + coords, rowids, funcs)
 
             # Margin
-            self._walk(remaining_dims, base_coords + (-1,), base_set, func)
+            self._walk(remaining_dims, base_coords + (-1,), base_rowids, funcs)
         elif dims:
             # Last dim. The `rowids` in each loop below are the rowids
             # that appear in all dims for this particular tuple of new_coords.
             # Any coordinate which is -1 targets the margin for that axis.
-            if base_set is None:
+            if base_rowids is None:
                 for coords, rowids in dims[0].items():
                     if len(rowids):
-                        func(base_coords + coords, rowids)
+                        for func in funcs:
+                            func(base_coords + coords, rowids)
             else:
-                self.intersection_data_points += len(base_set) * len(dims[0])
+                self.intersection_data_points += len(base_rowids) * len(dims[0])
                 for coords, rowids in dims[0].items():
                     self.intersection_data_points += len(rowids)
-                    rowids = set_intersect_merge_np(base_set, rowids)
+                    rowids = set_intersect_merge_np(base_rowids, rowids)
                     if len(rowids):
-                        func(base_coords + coords, rowids)
+                        for func in funcs:
+                            func(base_coords + coords, rowids)
 
                 # Margin
-                if len(base_set):
-                    func(base_coords + (-1,), base_set)
+                if len(base_rowids):
+                    for func in funcs:
+                        func(base_coords + (-1,), base_rowids)
 
-    def walk(self, func):
+    def walk(self, func_or_funcs):
         """Call func(interaction-of-coords, intersection-of-rowids) over self.dims.
 
         This recursively iterates over each dim in self, combining coordinates
@@ -131,12 +133,14 @@ class ccube:
         A simple count might then place a `4` in that cell in the cube;
         other ffuncs might use those rowids to look up other outputs.
         """
-        self._walk(self.dims, (), None, func)
+        if not isinstance(func_or_funcs, (tuple, list)):
+            func_or_funcs = [func_or_funcs]
+        self._walk(self.dims, (), None, func_or_funcs)
 
     def interactions(self):
         """Return (interaction-of-coords, intersection-of-rowids) pairs from self."""
         out = []
-        self.walk(lambda c, r: out.append((c, r)))
+        self.walk([lambda c, r: out.append((c, r))])
         return out
 
     def _compute_common_cells_from_marginal_diffs(self, region):
@@ -270,11 +274,6 @@ class ccube:
             for func, regions in zip(funcs, results):
                 print(func, ":", regions)
 
-        self._tracing = {}
-        for f in funcs:
-            # Collect tracing for each ffunc (possibly running concurrently).
-            self._tracing[f] = {"elapsed": 0.0, "start": None, "count": 0}
-
         def fill_one_cube(subcube_dims):
             if self.check_interrupt is not None:
                 self.check_interrupt()
@@ -283,13 +282,13 @@ class ccube:
                 [dim["data"] for dim in subcube_dims],
                 interacting_shape=self.interacting_shape,
             )
-
             subcube_coords = [dim["coords"] for dim in subcube_dims]
             if self.debug:
                 print("FILL SUBCUBE:", subcube_coords)
+            flattened_slice = [e for coords in subcube_coords for e in coords]
+
+            fill_funcs = []
             for func, regions in zip(funcs, results):
-                start = time.time()
-                flattened_slice = [e for coords in subcube_coords for e in coords]
                 if flattened_slice:
                     # The coords, when concatenated together, define which region
                     # of the complete result array(s) should be filled in
@@ -299,16 +298,12 @@ class ccube:
                     # our outer dimensions.
                     regions = [region[tuple(flattened_slice)] for region in regions]
 
-                func.fill(subcube, regions)
-                self.intersection_data_points += subcube.intersection_data_points
+                fill_funcs.append(func.fill_func(regions))
                 if self.debug:
                     print(func, ":=", regions)
 
-                bucket = self._tracing[func]
-                bucket["elapsed"] += time.time() - start
-                bucket["count"] += 1
-                if bucket["start"] is None:
-                    bucket["start"] = start
+            subcube.walk(fill_funcs)
+            self.intersection_data_points += subcube.intersection_data_points
 
         if self.parallel:
             with closing(multiprocessing.pool.ThreadPool(self.poolsize)) as pool:

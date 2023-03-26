@@ -35,7 +35,7 @@ class TestFfuncSumWorkflow:
         sums, missings = f.get_initial_regions(cube)
         assert sums.tolist() == 12.0
         assert missings.tolist() == 1
-        f.fill(cube, (sums, missings))
+        cube.walk(f.fill_func((sums, missings)))
         assert sums.tolist() == 12.0
         assert missings.tolist() == 1
         assert numpy.isnan(f.reduce(cube, (sums, missings)))
@@ -44,7 +44,7 @@ class TestFfuncSumWorkflow:
         sums, missings = f.get_initial_regions(cube)
         assert sums.tolist() == [0.0, 0.0, 12.0]
         assert missings.tolist() == [0, 0, 1]
-        f.fill(cube, (sums, missings))
+        cube.walk(f.fill_func((sums, missings)))
         assert sums.tolist() == [0.0, 1.0, 12.0]
         assert missings.tolist() == [0, 1, 1]
         assert arr_eq(f.reduce(cube, (sums, missings)), [11, float("nan")])
@@ -53,7 +53,7 @@ class TestFfuncSumWorkflow:
         sums, missings = f.get_initial_regions(cube)
         assert sums.tolist() == [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 12.0]]
         assert missings.tolist() == [[0, 0, 0], [0, 0, 0], [0, 0, 1]]
-        f.fill(cube, (sums, missings))
+        cube.walk(f.fill_func((sums, missings)))
         assert sums.tolist() == [[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 5.0, 12.0]]
         assert missings.tolist() == [[0, 0, 0], [0, 0, 1], [0, 0, 1]]
         assert arr_eq(
@@ -79,7 +79,7 @@ class TestFfuncSumWorkflow:
             [0, 0, 0],
             [0, 0, 2],
         ]
-        f.fill(cube, (sums, missings))
+        cube.walk(f.fill_func((sums, missings)))
         assert sums.tolist() == [
             [0.0, 0.0, 0.0],
             [0.0, 0.25, (1.0 * 0.25)],
