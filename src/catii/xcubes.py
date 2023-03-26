@@ -189,6 +189,9 @@ class xcube:
                 strided_dim if coords is None else strided_dim[(slice(None),) + coords]
                 for coords, strided_dim in zip(nested_coords, strided_dims)
             ]
+            flattened_slice = [
+                e for coords in nested_coords if coords is not None for e in coords
+            ]
 
             # Obtain compound coordinates by simply adding across: the values have
             # already been multiplied by the proper stride.
@@ -199,9 +202,6 @@ class xcube:
             for func, regions in zip(funcs, results):
                 start = time.time()
 
-                flattened_slice = [
-                    e for coords in nested_coords if coords is not None for e in coords
-                ]
                 if flattened_slice:
                     # The coords, when concatenated together, define which region
                     # of the complete result array(s) should be filled in
