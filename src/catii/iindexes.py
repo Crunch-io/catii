@@ -483,6 +483,19 @@ class iindex(dict):
                 mask[rowids] = False
         return mask.nonzero()[0].astype(self.rowid_dtype)
 
+    @staticmethod
+    def common_common(iindexes):
+        """Return the most common value among all the given iindexes."""
+        all_counts = defaultdict(int)
+        for index in iindexes:
+            counts = defaultdict(int)
+            for coords, rowids in index.items():
+                counts[coords[0]] += len(rowids)
+                all_counts[coords[0]] += len(rowids)
+            all_counts[index.common] += index.size - sum(counts.values())
+        dsu = max([(v, k) for k, v in all_counts.items()])
+        return dsu[1]
+
     def get(self, key, default=None, force=False):
         """Return rowids for the given coordinate key, or the default.
 

@@ -1045,8 +1045,7 @@ class xfunc_quantile(xfunc):
             weights, weights_validity = as_separate_validity(weights)
             validity = (validity.T & weights_validity).T
 
-        dtype = arr.dtype
-        if dtype is not float and not numpy.all(validity):
+        if arr.dtype is not float:
             arr = arr.astype(float)
         else:
             arr = arr.copy()

@@ -41,17 +41,23 @@ class xcube:
     def __init__(self, dims, interacting_shape=None):
         self.dims = [numpy.asarray(d) for d in dims]
 
+        # The "scaffold" is any additional axes present in the dimensions.
+        # These do not interact, but each combination in their Cartesian
+        # product forms an independent interaction.
         self.scaffold_shape = tuple(e for d in self.dims for e in d.shape[1:])
-        self.num_regions = reduce(operator.mul, self.scaffold_shape, 1)
+        self.scaffold_size = reduce(operator.mul, self.scaffold_shape, 1)
         self.parallel = (
-            self.num_regions > 2
-            and (self.dims[0].shape[0] * self.num_regions) >= BIG_REGIONS
+            self.scaffold_size > 2
+            and (self.dims[0].shape[0] * self.scaffold_size) >= BIG_REGIONS
         )
+
+        # Each independent interaction has the same shape.
         if interacting_shape is None:
             # Slow! Always pass interacting_shape if you already know extents.
             interacting_shape = tuple(max(d.flat) + 1 for d in self.dims)
         self.interacting_shape = interacting_shape
         self.shape = self.scaffold_shape + self.interacting_shape
+
         self._set_strides()
 
     def _set_strides(self):

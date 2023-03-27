@@ -42,25 +42,33 @@ class ccube:
     def __init__(self, dims, interacting_shape=None):
         self.dims = dims
 
+        # The "scaffold" is any additional axes present in the dimensions.
+        # These do not interact, but each combination in their Cartesian
+        # product forms an independent interaction.
         self.scaffold_shape = tuple(e for d in dims for e in d.shape[1:])
-        self.num_regions = reduce(operator.mul, self.scaffold_shape, 1)
+        self.scaffold = tuple(slice(None) for s in self.scaffold_shape)
+        self.scaffold_size = reduce(operator.mul, self.scaffold_shape, 1)
         self.parallel = (
-            self.num_regions > 2
-            and (self.dims[0].shape[0] * self.num_regions) >= BIG_REGIONS
+            self.scaffold_size > 2
+            and (self.dims[0].shape[0] * self.scaffold_size) >= BIG_REGIONS
         )
+
+        # Each independent interaction has the same shape.
         if interacting_shape is None:
             interacting_shape = tuple(
                 max([coords[0] for coords in d] + [d.common]) + 1 for d in dims
             )
         self.interacting_shape = interacting_shape
         self.shape = self.scaffold_shape + self.interacting_shape
+
+        # The cube is extended by 1 along each interacting axis while working.
+        # The cube itself doesn't use these properties, but they're vital
+        # for ffuncs.
         self.working_shape = self.scaffold_shape + tuple(
             e + 1 for e in self.interacting_shape
         )
-
-        self.scaffold = tuple(slice(None) for s in self.scaffold_shape)
-        self.corner = self.scaffold + tuple(-1 for d in dims)
         self.marginless = self.scaffold + tuple(slice(0, -1) for dim in dims)
+        self.corner = self.scaffold + tuple(-1 for d in dims)
 
         self.intersection_data_points = 0
 
