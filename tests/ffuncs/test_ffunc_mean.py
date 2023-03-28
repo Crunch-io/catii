@@ -36,7 +36,7 @@ class TestFfuncMeanWorkflow:
         assert sums.tolist() == 12.0
         assert counts.tolist() == 4
         assert missings.tolist() == 1
-        f.fill(cube, (sums, counts, missings))
+        cube.walk(f.fill_func((sums, counts, missings)))
         assert sums.tolist() == 12.0
         assert counts.tolist() == 4
         assert missings.tolist() == 1
@@ -47,7 +47,7 @@ class TestFfuncMeanWorkflow:
         assert sums.tolist() == [0.0, 0.0, 12.0]
         assert counts.tolist() == [0, 0, 4]
         assert missings.tolist() == [0, 0, 1]
-        f.fill(cube, (sums, counts, missings))
+        cube.walk(f.fill_func((sums, counts, missings)))
         assert sums.tolist() == [0.0, 1.0, 12.0]
         assert counts.tolist() == [0, 1, 4]
         assert missings.tolist() == [0, 1, 1]
@@ -60,7 +60,7 @@ class TestFfuncMeanWorkflow:
         assert sums.tolist() == [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 12.0]]
         assert counts.tolist() == [[0, 0, 0], [0, 0, 0], [0, 0, 4]]
         assert missings.tolist() == [[0, 0, 0], [0, 0, 0], [0, 0, 1]]
-        f.fill(cube, (sums, counts, missings))
+        cube.walk(f.fill_func((sums, counts, missings)))
         assert sums.tolist() == [[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 5.0, 12.0]]
         assert counts.tolist() == [[0, 0, 0], [0, 1, 1], [0, 2, 4]]
         assert missings.tolist() == [[0, 0, 0], [0, 0, 1], [0, 0, 1]]
@@ -92,7 +92,7 @@ class TestFfuncMeanWorkflow:
             [0, 0, 0],
             [0, 0, 2],
         ]
-        f.fill(cube, (sums, counts, missings))
+        cube.walk(f.fill_func((sums, counts, missings)))
         assert sums.tolist() == [
             [0.0, 0.0, 0.0],
             [0.0, 0.25, (1.0 * 0.25)],
