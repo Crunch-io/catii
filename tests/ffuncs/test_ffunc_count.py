@@ -1,9 +1,13 @@
+import sys
+
 import numpy
+import pytest
 
 from catii import ccube, ffuncs, iindex
 
 from .. import arr_eq, compare_ccube_to_xcube
 
+MAXFLOAT = sys.float_info.max
 idx1 = iindex({(1,): [0, 2]}, 0, (5,))  # [1, 0, 1, 0, 0]
 idx2 = iindex({(1,): [0, 3]}, 0, (5,))  # [1, 0, 0, 1, 0]
 wt = numpy.array([0.25, 0.3, 0.99, 1.0, float("nan")])
@@ -57,22 +61,32 @@ class TestFfuncCountWorkflow:
         weight, validity = ffuncs.as_separate_validity(wt)
 
         cube = ccube([idx1, idx2])
-        counts, missings = f.get_initial_regions(cube)
+        counts, valids, missings = f.get_initial_regions(cube)
         assert counts.tolist() == [
             [0.0, 0.0, 0.0],
             [0.0, 0.0, 0.0],
             [0.0, 0.0, wt[validity].sum()],
+        ]
+        assert valids.tolist() == [
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, validity.sum()],
         ]
         assert missings.tolist() == [
             [0, 0, 0],
             [0, 0, 0],
             [0, 0, 1],
         ]
-        cube.walk(f.fill_func((counts, missings)))
+        cube.walk(f.fill_func((counts, valids, missings)))
         assert counts.tolist() == [
             [0.0, 0.0, 0.0],
             [0.0, 0.25, (0.25 + 0.99)],
             [0.0, (0.25 + 1.0), wt[validity].sum()],
+        ]
+        assert valids.tolist() == [
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 2.0],
+            [0.0, 2.0, validity.sum()],
         ]
         assert missings.tolist() == [
             [0, 0, 0],  # idx1 == 0
@@ -80,7 +94,8 @@ class TestFfuncCountWorkflow:
             [0, 0, 1],  # idx1 == any
         ]
         assert arr_eq(
-            f.reduce(cube, (counts, missings)), [[float("nan"), 1.0], [0.99, 0.25]],
+            f.reduce(cube, (counts, valids, missings)),
+            [[float("nan"), 1.0], [0.99, 0.25]],
         )
 
     def test_single_arr_with_nan_workflow(self):
@@ -89,95 +104,168 @@ class TestFfuncCountWorkflow:
 
 
 class TestFfuncCountWeights:
-    @compare_ccube_to_xcube
     def test_weights(self):
-        counts = ccube([idx1]).count(weights=None)
-        assert arr_eq(counts, [3, 2])
+        with compare_ccube_to_xcube():
+            counts = ccube([idx1]).count(weights=None)
+            assert arr_eq(counts, [3, 2])
 
-        counts = ccube([idx1]).count(weights=[0.25, 0.3, 0.99, 1.0, 0.5])
-        assert arr_eq(counts, [1.8, 1.24])
+            counts = ccube([idx1]).count(weights=[0.25, 0.3, 0.99, 1.0, 0.5])
+            assert arr_eq(counts, [1.8, 1.24])
 
-        counts = ccube([idx1]).count(weights=[0.25, 0.3, 0.99, 1.0, float("nan")])
-        assert arr_eq(counts, [float("nan"), 1.24])
+            counts = ccube([idx1]).count(weights=[0.25, 0.3, 0.99, 1.0, float("nan")])
+            assert arr_eq(counts, [float("nan"), 1.24])
 
-        counts = ccube([idx1]).count(
-            weights=[0.25, 0.3, 0.99, 1.0, float("nan")], ignore_missing=True
-        )
-        assert arr_eq(counts, [1.3, 1.24])
+            counts = ccube([idx1]).count(
+                weights=[0.25, 0.3, 0.99, 1.0, float("nan")], ignore_missing=True
+            )
+            assert arr_eq(counts, [1.3, 1.24])
 
-        counts = ccube([idx1]).count(weights=0.5)
-        assert arr_eq(counts, [1.5, 1.0])
+            counts = ccube([idx1]).count(weights=0.5)
+            assert arr_eq(counts, [1.5, 1.0])
 
-        counts = ccube([idx1]).count(weights=float("nan"))
-        assert arr_eq(counts, [float("nan"), float("nan")])
+            counts = ccube([idx1]).count(weights=float("nan"))
+            assert arr_eq(counts, [float("nan"), float("nan")])
 
-        counts = ccube([idx1]).count(weights=float("nan"), ignore_missing=True)
-        assert arr_eq(counts, [float("nan"), float("nan")])
-
-
-class TestFfuncCountIgnoreMissing:
-    @compare_ccube_to_xcube
-    def test_ignore_missing(self):
-        # The cube of idx1 has rowids:
-        # 0           1
-        # [1, 3, 4]   [0, 2]
-        # and weights:
-        # 0                1
-        # [0.3, 1.0, nan]  [0.25, 0.99]
-
-        counts = ccube([idx1]).count(weights=wt)
-        # Cell (0,) MUST be missing, because it had a missing weight.
-        assert arr_eq(counts, [float("nan"), (0.25 + 0.99)])
-
-        counts = ccube([idx1]).count(weights=wt, ignore_missing=True)
-        # Cell (0,) MUST NOT be missing, because it had a valid weight.
-        assert arr_eq(counts, [(0.3 + 1.0), (0.25 + 0.99)])
-
-        # The cube of idx1 x idx2 has weights:
-        #      ______idx 2_______
-        #      0           1
-        # i|0  [0.3, nan]  [1.0]
-        # d|
-        # x|
-        # 1|1  [0.99       [0.25]
-
-        counts = ccube([idx1, idx2]).count(weights=wt)
-        # Cell (0, 0) MUST be missing, because it had a missing weight.
-        assert arr_eq(counts, [[float("nan"), 1.0], [0.99, 0.25]])
-
-        counts = ccube([idx1, idx2]).count(weights=wt, ignore_missing=True)
-        # Cell (0, 0) MUST NOT be missing, because it had non-missing weights
-        assert arr_eq(counts, [[0.3, 1.0], [0.99, 0.25]])
+            counts = ccube([idx1]).count(weights=float("nan"), ignore_missing=True)
+            assert arr_eq(counts, [float("nan"), float("nan")])
 
 
-class TestFfuncCountReturnMissingAs:
-    @compare_ccube_to_xcube
-    def test_return_missing_as(self):
-        counts = ccube([idx1]).count(weights=wt)
-        assert arr_eq(counts, [float("nan"), (0.25 + 0.99)])
+class TestFfuncCountMissingness:
+    # Make sure each combination of these options works properly:
+    #  * ignore_missing = True/False
+    #  * return_missing_as = NaN/(<sentinel value>, False)
+    #  * at least one output cell which has no inputs
+    #  * [count() takes no fact variable]
+    #  * weights variable (with missings) as:
+    #    * single array with NaN
+    #    * no NaN, but separate "validity" array
+    #    * includes NaN, but separate "validity" array
+    idx_with_empty_cell = iindex({(1,): [3]}, 0, (5,))  # [0, 0, 0, 1, 0]
 
-        counts, validity = ccube([idx1]).count(weights=wt, return_missing_as=(0, False))
-        assert counts.tolist() == [0, (0.25 + 0.99)]
-        assert validity.tolist() == [False, True]
+    dirty_weights = [9.0, 9.0, float("nan"), 9.0, 9.0]
+    clean_weights = [9.0, 9.0, MAXFLOAT, 9.0, 9.0]
+    weights_validity = [True, True, False, True, True]
 
-        counts, validity = ccube([idx1]).count(
-            weights=wt, ignore_missing=True, return_missing_as=(0, False)
-        )
-        assert counts.tolist() == [(0.3 + 1.0), (0.25 + 0.99)]
-        assert validity.tolist() == [True, True]
+    args = [
+        dirty_weights,
+        (clean_weights, weights_validity),
+        (dirty_weights, weights_validity),
+    ]
 
-        counts = ccube([idx1, idx2]).count(weights=wt)
-        assert arr_eq(counts, [[float("nan"), 1.0], [0.99, 0.25]])
+    @pytest.mark.parametrize("weights", args)
+    def test_propagate_missing_return_nan(self, weights):
+        WT = 1.0 if weights is None else 9.0
+        with compare_ccube_to_xcube():
+            # The cube of idx1 has rowids:
+            # 0           1
+            # [1, 3, 4]  [0, 2]
+            # and fact values:
+            # 0           1
+            # [2.0, 4.0, 5.0]  [1.0, nan]
+            counts = ccube([idx1]).count(weights)
+            # Cell (1,) MUST be missing, because it had a missing input.
+            assert arr_eq(counts, [3.0 * WT, float("nan")])
 
-        counts, validity = ccube([idx1, idx2]).count(
-            weights=wt, return_missing_as=(0, False)
-        )
-        assert counts.tolist() == [[0, 1.0], [0.99, 0.25]]
-        assert validity.tolist() == [[False, True], [True, True]]
+            # The cube of idx1 x idx_with_empty_cell has fact values:
+            #      _______idx w_______
+            #      0           1
+            # i|0  [2.0, 5.0]  [4.0]
+            # d|
+            # x|
+            # 1|1  [1.0, nan]       []
+            counts = ccube([idx1, self.idx_with_empty_cell]).count(weights)
+            # Cell (1, 0) MUST be missing, because it had a missing input.
+            # Cell (1, 1) MUST be missing, because it had no inputs.
+            assert arr_eq(counts, [[2.0 * WT, 1.0 * WT], [float("nan"), float("nan")]])
 
-        counts = ccube([iindex({(2,): [0, 2]}, 0, (5,))]).count()
-        # Force cells that had no inputs to 0 by using return_missing_as=0.
-        assert arr_eq(counts, [3, float("nan"), 2])
-        counts = ccube([iindex({(2,): [0, 2]}, 0, (5,))]).count(return_missing_as=0)
-        # Force cells that had no inputs to 0 by using return_missing_as=0.
-        assert arr_eq(counts, [3, 0, 2])
+    @pytest.mark.parametrize("weights", args)
+    def test_ignore_missing_return_nan(self, weights):
+        WT = 1.0 if weights is None else 9.0
+        with compare_ccube_to_xcube():
+            # The cube of idx1 has rowids:
+            # 0           1
+            # [1, 3, 4]  [0, 2]
+            # and fact values:
+            # 0           1
+            # [2.0, 4.0, 5.0]  [1.0, nan]
+            counts = ccube([idx1]).count(weights, ignore_missing=True)
+            # Cell (1,) MUST NOT be missing, because it had a valid input.
+            assert arr_eq(counts, [3.0 * WT, 1.0 * WT])
+
+            # The cube of idx1 x idx_with_empty_cell has fact values:
+            #      _______idx w_______
+            #      0           1
+            # i|0  [2.0, 5.0]  [4.0]
+            # d|
+            # x|
+            # 1|1  [1.0, nan]       []
+            counts = ccube([idx1, self.idx_with_empty_cell]).count(
+                weights, ignore_missing=True
+            )
+            # Cell (1, 0) MUST NOT be missing, because it had a valid input.
+            # Cell (1, 1) MUST be missing, because it had no inputs.
+            assert arr_eq(counts, [[2.0 * WT, 1.0 * WT], [1.0 * WT, float("nan")]])
+
+    @pytest.mark.parametrize("weights", args)
+    def test_propagate_missing_return_validity(self, weights):
+        WT = 1.0 if weights is None else 9.0
+        with compare_ccube_to_xcube():
+            # The cube of idx1 has rowids:
+            # 0           1
+            # [1, 3, 4]  [0, 2]
+            # and fact values:
+            # 0           1
+            # [2.0, 4.0, 5.0]  [1.0, nan]
+            counts, validity = ccube([idx1]).count(
+                weights, return_missing_as=(-1, False)
+            )
+            # Cell (1,) MUST be missing, because it had a missing input.
+            assert arr_eq(counts, [3.0 * WT, -1])
+            assert arr_eq(validity, [True, False])
+
+            # The cube of idx1 x idx_with_empty_cell has fact values:
+            #      _______idx w_______
+            #      0           1
+            # i|0  [2.0, 5.0]  [4.0]
+            # d|
+            # x|
+            # 1|1  [1.0, nan]       []
+            counts, validity = ccube([idx1, self.idx_with_empty_cell]).count(
+                weights, return_missing_as=(-1, False)
+            )
+            # Cell (1, 0) MUST be missing, because it had a missing input.
+            # Cell (1, 1) MUST be missing, because it had no inputs.
+            assert arr_eq(counts, [[2.0 * WT, 1.0 * WT], [-1, -1]])
+            assert arr_eq(validity, [[True, True], [False, False]])
+
+    @pytest.mark.parametrize("weights", args)
+    def test_ignore_missing_return_validity(self, weights):
+        WT = 1.0 if weights is None else 9.0
+        with compare_ccube_to_xcube():
+            # The cube of idx1 has rowids:
+            # 0           1
+            # [1, 3, 4]  [0, 2]
+            # and fact values:
+            # 0           1
+            # [2.0, 4.0, 5.0]  [1.0, nan]
+            counts, validity = ccube([idx1]).count(
+                weights, ignore_missing=True, return_missing_as=(-1, False)
+            )
+            # Cell (1,) MUST NOT be missing, because it had a valid input.
+            assert arr_eq(counts, [3.0 * WT, 1.0 * WT])
+            assert arr_eq(validity, [True, True])
+
+            # The cube of idx1 x idx_with_empty_cell has fact values:
+            #      _______idx w_______
+            #      0           1
+            # i|0  [2.0, 5.0]  [4.0]
+            # d|
+            # x|
+            # 1|1  [1.0, nan]       []
+            counts, validity = ccube([idx1, self.idx_with_empty_cell]).count(
+                weights, ignore_missing=True, return_missing_as=(-1, False)
+            )
+            # Cell (1, 0) MUST NOT be missing, because it had a valid input.
+            # Cell (1, 1) MUST be missing, because it had no inputs.
+            assert arr_eq(counts, [[2.0 * WT, 1.0 * WT], [1.0 * WT, -1]])
+            assert arr_eq(validity, [[True, True], [True, False]])

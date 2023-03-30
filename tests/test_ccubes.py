@@ -40,12 +40,12 @@ class TestCubeCreation:
 
 
 class TestCubeDimensions:
-    @compare_ccube_to_xcube
     def test_cube_1d_x_1d(self):
-        idx1 = iindex({(1,): [0, 2, 7]}, 0, (8,))
-        idx2 = iindex({(1,): [0, 2, 5]}, 0, (8,))
-        cube = ccube([idx1, idx2])
-        assert cube.count().tolist() == [[4, 1], [1, 2]]
+        with compare_ccube_to_xcube():
+            idx1 = iindex({(1,): [0, 2, 7]}, 0, (8,))
+            idx2 = iindex({(1,): [0, 2, 5]}, 0, (8,))
+            cube = ccube([idx1, idx2])
+            assert cube.count().tolist() == [[4, 1], [1, 2]]
 
 
 class TestCubeProduct:
@@ -97,9 +97,9 @@ class TestCubeCalculate:
         idx2 = iindex({(1, 0): [0, 2, 5], (1, 1): [3, 4]}, 0, (8, 2))
         cube = ccube([idx1, idx2])
         counts = cube.calculate([ffunc_count()])[0]
-        assert arr_eq(counts, [[[4, 1], [1, 2]], [[3, 2], [3, float("nan")]],])
+        assert arr_eq(counts, [[[4, 1], [1, 2]], [[3, 2], [3, float("nan")]]])
 
         fsum = ffunc_sum((numpy.arange(8)))
         counts, sums = cube.calculate([ffunc_count(), fsum])
-        assert arr_eq(counts, [[[4, 1], [1, 2]], [[3, 2], [3, float("nan")]],])
-        assert arr_eq(sums, [[[14, 5], [7, 2]], [[12, 7], [9, 0]]])
+        assert arr_eq(counts, [[[4, 1], [1, 2]], [[3, 2], [3, float("nan")]]])
+        assert arr_eq(sums, [[[14, 5], [7, 2]], [[12, 7], [9, float("nan")]]])

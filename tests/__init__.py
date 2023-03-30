@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 import numpy
 
 from catii import ccube
@@ -8,12 +10,10 @@ def arr_eq(a, b):
     return numpy.allclose(a, b, equal_nan=True)
 
 
-def compare_ccube_to_xcube(f):
-    def _with_cube_comparison(*args, **kwargs):
-        ccube._compare_output_to_xcube_for_tests = True
-        try:
-            return f(*args, **kwargs)
-        finally:
-            ccube._compare_output_to_xcube_for_tests = False
-
-    return _with_cube_comparison
+@contextmanager
+def compare_ccube_to_xcube():
+    ccube._compare_output_to_xcube_for_tests = True
+    try:
+        yield
+    finally:
+        ccube._compare_output_to_xcube_for_tests = False

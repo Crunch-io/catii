@@ -59,9 +59,9 @@ class TestXCubeCalculate:
         arr2 = [[1, 0], [0, 0], [1, 0], [0, 1], [0, 1], [1, 0], [0, 0], [0, 0]]
         cube = xcube([arr1, arr2])
         counts = cube.calculate([xfunc_count()])[0]
-        assert arr_eq(counts, [[[4, 1], [1, 2]], [[3, 2], [3, float("nan")]],])
+        assert arr_eq(counts, [[[4, 1], [1, 2]], [[3, 2], [3, float("nan")]]])
 
         fsum = xfunc_sum(numpy.arange(8))
         counts, sums = cube.calculate([xfunc_count(), fsum])
-        assert arr_eq(counts, [[[4, 1], [1, 2]], [[3, 2], [3, float("nan")]],])
-        assert arr_eq(sums, [[[14, 5], [7, 2]], [[12, 7], [9, 0]]])
+        assert arr_eq(counts, [[[4, 1], [1, 2]], [[3, 2], [3, float("nan")]]])
+        assert arr_eq(sums, [[[14, 5], [7, 2]], [[12, 7], [9, float("nan")]]])

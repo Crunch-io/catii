@@ -220,12 +220,12 @@ class xfunc_count(xfunc):
         if self.weights is None:
             return (counts,)
         else:
+            valid_counts = numpy.zeros(shape, dtype=int)
             if self.ignore_missing:
-                valid_counts = numpy.zeros(shape, dtype=int)
                 return counts, valid_counts
             else:
                 missing_counts = numpy.zeros(shape, dtype=int)
-                return counts, missing_counts
+                return counts, valid_counts, missing_counts
 
     def fill(self, coordinates, regions):
         """Fill the `regions` arrays with distributions contingent on coordinates.
@@ -254,7 +254,7 @@ class xfunc_count(xfunc):
             if self.ignore_missing:
                 counts, valid_counts = regions
             else:
-                counts, missing_counts = regions
+                counts, valid_counts, missing_counts = regions
 
             if coordinates is None:
                 # Dimensionless cube
@@ -263,9 +263,8 @@ class xfunc_count(xfunc):
                         "Cannot determine counts with no dimensions, weights, or N."
                     )
                 counts[:] = self.weights.sum()
-                if self.ignore_missing:
-                    valid_counts[:] = numpy.count_nonzero(self.validity, axis=0)
-                else:
+                valid_counts[:] = numpy.count_nonzero(self.validity, axis=0)
+                if not self.ignore_missing:
                     missing_counts[:] = numpy.count_nonzero(~self.validity, axis=0)
             else:
                 size = counts.shape[0]
@@ -273,20 +272,18 @@ class xfunc_count(xfunc):
                     counts[:] = numpy.bincount(
                         coordinates, weights=self.weights, minlength=size
                     )
-                    if self.ignore_missing:
-                        valid_counts[:] = numpy.bincount(
-                            coordinates, weights=self.validity, minlength=size
-                        )
-                    else:
+                    valid_counts[:] = numpy.bincount(
+                        coordinates, weights=self.validity, minlength=size
+                    )
+                    if not self.ignore_missing:
                         missing_counts[:] = numpy.bincount(
                             coordinates, weights=~self.validity, minlength=size
                         )
                 else:
                     bcounts = numpy.bincount(coordinates, minlength=size)
                     counts[:] = bcounts * self.weights
-                    if self.ignore_missing:
-                        valid_counts[:] = bcounts * self.validity
-                    else:
+                    valid_counts[:] = bcounts * self.validity
+                    if not self.ignore_missing:
                         missing_counts[:] = bcounts * ~self.validity
 
     def reduce(self, cube, regions):
@@ -303,20 +300,17 @@ class xfunc_count(xfunc):
         else:
             if self.ignore_missing:
                 counts, valid_counts = regions
-                counts = self.adjust_zeros(
-                    counts, self.null, condition=valid_counts == 0
-                )
+                output_is_missing = valid_counts == 0
             else:
-                counts, missing_counts = regions
-                counts = self.adjust_zeros(
-                    counts, self.null, condition=missing_counts != 0
-                )
+                counts, valid_counts, missing_counts = regions
+                # We have to use valid_counts to mark cells which had no inputs.
+                # We have to use missing_counts to mark cells which had missing
+                # values in their inputs (which ignore_missing can skip).
+                output_is_missing = (valid_counts == 0) | (missing_counts != 0)
+            counts = self.adjust_zeros(counts, self.null, condition=output_is_missing)
 
             if isinstance(self.return_missing_as, tuple):
-                if self.ignore_missing:
-                    validity = valid_counts != 0
-                else:
-                    validity = missing_counts == 0
+                validity = ~output_is_missing
                 return counts, validity
             else:
                 return counts
@@ -384,12 +378,12 @@ class xfunc_valid_count(xfunc):
             # counts with NaN, which would screw up marginal differencing.
             return (counts,)
         else:
+            valid_counts = numpy.zeros(shape, dtype=int)
             if self.ignore_missing:
-                valid_counts = numpy.zeros(shape, dtype=int)
                 return counts, valid_counts
             else:
                 missing_counts = numpy.zeros(shape, dtype=int)
-                return counts, missing_counts
+                return counts, valid_counts, missing_counts
 
     def fill(self, coordinates, regions):
         """Fill the `regions` arrays with distributions contingent on coordinates.
@@ -407,7 +401,7 @@ class xfunc_valid_count(xfunc):
             if self.ignore_missing:
                 counts, valid_counts = regions
             else:
-                counts, missing_counts = regions
+                counts, valid_counts, missing_counts = regions
 
         # This can be called thousands of times, so it's critical
         # to perform as few passes over the data as possible.
@@ -418,9 +412,8 @@ class xfunc_valid_count(xfunc):
             if self.return_missing_as == 0:
                 pass
             else:
-                if self.ignore_missing:
-                    valid_counts[:] = numpy.count_nonzero(self.validity, axis=0)
-                else:
+                valid_counts[:] = numpy.count_nonzero(self.validity, axis=0)
+                if not self.ignore_missing:
                     missing_counts[:] = numpy.count_nonzero(~self.validity, axis=0)
         else:
             size = counts.shape[0]
@@ -431,11 +424,10 @@ class xfunc_valid_count(xfunc):
                 if self.return_missing_as == 0:
                     pass
                 else:
-                    if self.ignore_missing:
-                        valid_counts[:] = numpy.bincount(
-                            coordinates, weights=self.validity, minlength=size
-                        )
-                    else:
+                    valid_counts[:] = numpy.bincount(
+                        coordinates, weights=self.validity, minlength=size
+                    )
+                    if not self.ignore_missing:
                         missing_counts[:] = numpy.bincount(
                             coordinates, weights=~self.validity, minlength=size
                         )
@@ -452,9 +444,8 @@ class xfunc_valid_count(xfunc):
                         pass
                     else:
                         valid_segment = self.validity[rowmask]
-                        if self.ignore_missing:
-                            valid_counts[i] = numpy.sum(valid_segment, axis=0)
-                        else:
+                        valid_counts[i] = numpy.sum(valid_segment, axis=0)
+                        if not self.ignore_missing:
                             missing_counts[i] = len(valid_segment) - numpy.sum(
                                 valid_segment, axis=0
                             )
@@ -467,20 +458,17 @@ class xfunc_valid_count(xfunc):
         else:
             if self.ignore_missing:
                 counts, valid_counts = regions
-                counts = self.adjust_zeros(
-                    counts, self.null, condition=valid_counts == 0
-                )
+                output_is_missing = valid_counts == 0
             else:
-                counts, missing_counts = regions
-                counts = self.adjust_zeros(
-                    counts, self.null, condition=missing_counts != 0
-                )
+                counts, valid_counts, missing_counts = regions
+                # We have to use valid_counts to mark cells which had no inputs.
+                # We have to use missing_counts to mark cells which had missing
+                # values in their inputs (which ignore_missing can skip).
+                output_is_missing = (valid_counts == 0) | (missing_counts != 0)
+            counts = self.adjust_zeros(counts, self.null, condition=output_is_missing)
 
         if isinstance(self.return_missing_as, tuple):
-            if self.ignore_missing:
-                validity = valid_counts != 0
-            else:
-                validity = missing_counts == 0
+            validity = ~output_is_missing
             return counts, validity
         else:
             return counts
@@ -532,7 +520,10 @@ class xfunc_sum(xfunc):
 
     def get_initial_regions(self, cube):
         """Return empty NumPy arrays to fill."""
-        dtype = self.summables.dtype if self.weights is None else float
+        if self.weights is None and not numpy.isnan(self.null):
+            dtype = self.summables.dtype
+        else:
+            dtype = float
 
         # summables may itself be an N-dimensional numeric array
         shape = cube.shape + self.summables.shape[1:]
@@ -540,12 +531,12 @@ class xfunc_sum(xfunc):
             shape = (1,)
         sums = numpy.zeros(shape, dtype=dtype)
 
+        valid_counts = numpy.zeros(shape, dtype=int)
         if self.ignore_missing:
-            valid_counts = numpy.zeros(shape, dtype=int)
             return sums, valid_counts
         else:
             missing_counts = numpy.zeros(shape, dtype=int)
-            return sums, missing_counts
+            return sums, valid_counts, missing_counts
 
     def fill(self, coordinates, regions):
         """Fill the `regions` arrays with distributions contingent on coordinates.
@@ -560,7 +551,7 @@ class xfunc_sum(xfunc):
         if self.ignore_missing:
             sums, valid_counts = regions
         else:
-            sums, missing_counts = regions
+            sums, valid_counts, missing_counts = regions
 
         # This can be called thousands of times, so it's critical
         # to perform as few passes over the data as possible.
@@ -569,9 +560,8 @@ class xfunc_sum(xfunc):
 
         if coordinates is None:
             sums[:] = numpy.nansum(self.summables, axis=0)
-            if self.ignore_missing:
-                valid_counts[:] = numpy.count_nonzero(self.validity, axis=0)
-            else:
+            valid_counts[:] = numpy.count_nonzero(self.validity, axis=0)
+            if not self.ignore_missing:
                 missing_counts[:] = numpy.count_nonzero(~self.validity, axis=0)
         else:
             size = sums.shape[0]
@@ -579,11 +569,10 @@ class xfunc_sum(xfunc):
                 sums[:] = numpy.bincount(
                     coordinates, weights=self.summables, minlength=size
                 )
-                if self.ignore_missing:
-                    valid_counts[:] = numpy.bincount(
-                        coordinates, weights=self.validity, minlength=size
-                    )
-                else:
+                valid_counts[:] = numpy.bincount(
+                    coordinates, weights=self.validity, minlength=size
+                )
+                if not self.ignore_missing:
                     missing_counts[:] = numpy.bincount(
                         coordinates, weights=~self.validity, minlength=size
                     )
@@ -597,9 +586,8 @@ class xfunc_sum(xfunc):
                     sums[i] = numpy.sum(self.summables[rowmask], axis=0)
 
                     valid_segment = self.validity[rowmask]
-                    if self.ignore_missing:
-                        valid_counts[i] = numpy.sum(valid_segment, axis=0)
-                    else:
+                    valid_counts[i] = numpy.sum(valid_segment, axis=0)
+                    if not self.ignore_missing:
                         missing_counts[i] = len(valid_segment) - numpy.sum(
                             valid_segment, axis=0
                         )
@@ -608,16 +596,17 @@ class xfunc_sum(xfunc):
         """Return `regions` reduced to proper output."""
         if self.ignore_missing:
             sums, valid_counts = regions
-            sums = self.adjust_zeros(sums, self.null, condition=valid_counts == 0)
+            output_is_missing = valid_counts == 0
         else:
-            sums, missing_counts = regions
-            sums = self.adjust_zeros(sums, self.null, condition=missing_counts != 0)
+            sums, valid_counts, missing_counts = regions
+            # We have to use valid_counts to mark cells which had no inputs.
+            # We have to use missing_counts to mark cells which had missing
+            # values in their inputs (which ignore_missing can skip).
+            output_is_missing = (valid_counts == 0) | (missing_counts != 0)
+        sums = self.adjust_zeros(sums, self.null, condition=output_is_missing)
 
         if isinstance(self.return_missing_as, tuple):
-            if self.ignore_missing:
-                validity = valid_counts != 0
-            else:
-                validity = missing_counts == 0
+            validity = ~output_is_missing
             return sums, validity
         else:
             return sums
@@ -746,20 +735,21 @@ class xfunc_mean(xfunc):
         """Return `regions` reduced to proper output."""
         if self.ignore_missing:
             sums, valid_counts = regions
-            with numpy.errstate(divide="ignore", invalid="ignore"):
-                means = sums / valid_counts
-            means = self.adjust_zeros(means, self.null, condition=valid_counts == 0)
+            output_is_missing = valid_counts == 0
         else:
             sums, valid_counts, missing_counts = regions
-            with numpy.errstate(divide="ignore", invalid="ignore"):
-                means = sums / valid_counts
-            means = self.adjust_zeros(means, self.null, condition=missing_counts != 0)
+            # We have to use missing_counts or we would miss marking cells
+            # which had missing values in their inputs.
+            # We *also* have to use valid_counts or we would miss marking cells
+            # which had no inputs at all.
+            output_is_missing = (valid_counts == 0) | (missing_counts != 0)
+
+        with numpy.errstate(divide="ignore", invalid="ignore"):
+            means = sums / valid_counts
+        means = self.adjust_zeros(means, self.null, condition=output_is_missing)
 
         if isinstance(self.return_missing_as, tuple):
-            if self.ignore_missing:
-                validity = valid_counts != 0
-            else:
-                validity = missing_counts == 0
+            validity = ~output_is_missing
             return means, validity
         else:
             return means
