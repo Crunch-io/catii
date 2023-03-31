@@ -816,12 +816,12 @@ class xfunc_stddev(xfunc):
         if not shape:
             shape = (1,)
         stddevs = numpy.full(shape, self.null, dtype=float)
+        valid_counts = numpy.zeros(shape, dtype=int)
         if self.ignore_missing:
-            valid_counts = numpy.zeros(shape, dtype=int)
             return stddevs, valid_counts
         else:
             missing_counts = numpy.zeros(shape, dtype=int)
-            return stddevs, missing_counts
+            return stddevs, valid_counts, missing_counts
 
     def fill(self, coordinates, regions):
         """Fill the `regions` arrays with distributions contingent on coordinates.
@@ -883,7 +883,7 @@ class xfunc_stddev(xfunc):
             countables = countables[validity]
             weights = None if self.weights is None else self.weights[validity]
         else:
-            stddevs, missing_counts = regions
+            stddevs, valid_counts, missing_counts = regions
             weights = self.weights
 
         N = numpy.count_nonzero(validity, axis=0)
@@ -909,9 +909,8 @@ class xfunc_stddev(xfunc):
                         (varsums / numpy.nansum(weights)) * (N / (N - 1))
                     )
 
-        if self.ignore_missing:
-            valid_counts[:] = N
-        else:
+        valid_counts[:] = N
+        if not self.ignore_missing:
             missing_counts[:] = len(self.summables) - N
 
     def _fill_one_by_coordinates(
@@ -925,7 +924,7 @@ class xfunc_stddev(xfunc):
             countables = countables[validity]
             weights = None if self.weights is None else self.weights[validity]
         else:
-            stddevs, missing_counts = regions
+            stddevs, valid_counts, missing_counts = regions
             coords = coordinates
             weights = self.weights
         size = stddevs.shape[0]
@@ -952,9 +951,8 @@ class xfunc_stddev(xfunc):
                 weightsums = numpy.bincount(coords, weights=weights, minlength=size)
                 stddevs[:] = numpy.sqrt((varsums / weightsums) * (N / (N - 1)))
 
-        if self.ignore_missing:
-            valid_counts[:] = N
-        else:
+        valid_counts[:] = N
+        if not self.ignore_missing:
             missing_counts[:] = numpy.bincount(
                 coordinates, weights=~validity, minlength=size
             )
@@ -963,19 +961,19 @@ class xfunc_stddev(xfunc):
         """Return `regions` reduced to proper output."""
         if self.ignore_missing:
             stddevs, valid_counts = regions
-            stddevs = self.adjust_zeros(stddevs, self.null, condition=valid_counts < 2)
+            output_is_missing = valid_counts < 2
         else:
-            stddevs, missing_counts = regions
-            stddevs = self.adjust_zeros(
-                stddevs, self.null, condition=missing_counts != 0
-            )
+            stddevs, valid_counts, missing_counts = regions
+            # We have to use missing_counts or we would miss marking cells
+            # which had missing values in their inputs.
+            # We *also* have to use valid_counts or we would miss marking cells
+            # which had no inputs at all.
+            output_is_missing = (valid_counts == 0) | (missing_counts != 0)
+
+        stddevs = self.adjust_zeros(stddevs, self.null, condition=output_is_missing)
 
         if isinstance(self.return_missing_as, tuple):
-            if self.ignore_missing:
-                validity = valid_counts > 1
-            else:
-                validity = missing_counts == 0
-            return stddevs, validity
+            return stddevs, ~output_is_missing
         else:
             return stddevs
 
