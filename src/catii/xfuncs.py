@@ -1066,7 +1066,7 @@ class xfunc_quantile(xfunc):
         shape = cube.shape + self.shape
         if not shape:
             shape = (1,)
-        qs = numpy.full(shape, self.null, dtype=float)
+        qs = numpy.full(shape, float("nan"), dtype=float)
         return (qs,)
 
     def fill(self, coordinates, regions):
@@ -1081,10 +1081,13 @@ class xfunc_quantile(xfunc):
         size = qs.shape[0]
         if self.weights is None:
             if coordinates is None:
-                qs[:] = self.qfunc(self.arr, self.probability, axis=0)
+                if len(self.arr):
+                    qs[:] = self.qfunc(self.arr, self.probability, axis=0)
             else:
                 for i, rowmask in self.bins(coordinates, size):
-                    qs[i] = self.qfunc(self.arr[rowmask], self.probability, axis=0)
+                    seg = self.arr[rowmask]
+                    if len(seg):
+                        qs[i] = self.qfunc(self.arr[rowmask], self.probability, axis=0)
         else:
             if coordinates is None:
                 qs[:] = self.weighted_quantile(self.arr, self.probability, self.weights)
