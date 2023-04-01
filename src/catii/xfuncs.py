@@ -1331,7 +1331,7 @@ class xfunc_corrcoef(xfunc):
         shape = cube.shape + self.shape
         if not shape:
             shape = (1,)
-        corrcoefs = numpy.full(shape, self.null, dtype=float)
+        corrcoefs = numpy.full(shape, float("nan"), dtype=float)
         return (corrcoefs,)
 
     def fill(self, coordinates, regions):
