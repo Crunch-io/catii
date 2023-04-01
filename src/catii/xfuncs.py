@@ -1217,11 +1217,18 @@ class xfunc_op_base(xfunc):
                 values = values[self.validity]
                 coordinates = coordinates[self.validity]
 
-            for i in range(output_values.shape[0]):
-                matches = values[coordinates == i]
-                if len(matches):
-                    output_values[i] = self.op(matches, axis=0)
-                    output_validity[i] = True
+                for i in range(output_values.shape[0]):
+                    matches = values[coordinates == i]
+                    if len(matches):
+                        output_values[i] = self.op(matches, axis=0)
+                        output_validity[i] = True
+            else:
+                for i in range(output_values.shape[0]):
+                    rowmask = coordinates == i
+                    matches = values[rowmask]
+                    if len(matches) and all(self.validity[rowmask]):
+                        output_values[i] = self.op(matches, axis=0)
+                        output_validity[i] = True
 
     def reduce(self, cube, regions):
         """Return `regions` reduced to proper output."""
