@@ -1423,7 +1423,7 @@ class xfunc_covariance(xfunc):
         shape = cube.shape + self.shape
         if not shape:
             shape = (1,)
-        covs = numpy.full(shape, self.null, dtype=float)
+        covs = numpy.full(shape, float("nan"), dtype=float)
         return (covs,)
 
     def fill(self, coordinates, regions):
