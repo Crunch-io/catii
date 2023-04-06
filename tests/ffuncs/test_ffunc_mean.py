@@ -157,7 +157,7 @@ class TestFfuncMeanMissingness:
     clean_weights = [9.0, 9.0, MAXFLOAT, 9.0, 9.0]
     weights_validity = [True, True, False, True, True]
 
-    args = [
+    params = [
         [dirty_fact, None],
         [(clean_fact, fact_validity), None],
         [(dirty_fact, fact_validity), None],
@@ -175,7 +175,7 @@ class TestFfuncMeanMissingness:
         [(clean_fact, fact_all_valid), (dirty_weights, weights_validity)],
     ]
 
-    @pytest.mark.parametrize("factvar,weights", args)
+    @pytest.mark.parametrize("factvar,weights", params)
     def test_propagate_missing_return_nan(self, factvar, weights):
         with compare_ccube_to_xcube():
             # The cube of idx1 has rowids:
@@ -200,7 +200,7 @@ class TestFfuncMeanMissingness:
             # Cell (1, 1) MUST be missing, because it had no inputs.
             assert arr_eq(means, [[3.5, 4.0], [float("nan"), float("nan")]])
 
-    @pytest.mark.parametrize("factvar,weights", args)
+    @pytest.mark.parametrize("factvar,weights", params)
     def test_ignore_missing_return_nan(self, factvar, weights):
         with compare_ccube_to_xcube():
             # The cube of idx1 has rowids:
@@ -227,7 +227,7 @@ class TestFfuncMeanMissingness:
             # Cell (1, 1) MUST be missing, because it had no inputs.
             assert arr_eq(means, [[3.5, 4.0], [1.0, float("nan")]])
 
-    @pytest.mark.parametrize("factvar,weights", args)
+    @pytest.mark.parametrize("factvar,weights", params)
     def test_propagate_missing_return_validity(self, factvar, weights):
         with compare_ccube_to_xcube():
             # The cube of idx1 has rowids:
@@ -258,7 +258,7 @@ class TestFfuncMeanMissingness:
             assert arr_eq(means, [[3.5, 4.0], [-1, -1]])
             assert arr_eq(validity, [[True, True], [False, False]])
 
-    @pytest.mark.parametrize("factvar,weights", args)
+    @pytest.mark.parametrize("factvar,weights", params)
     def test_ignore_missing_return_validity(self, factvar, weights):
         with compare_ccube_to_xcube():
             # The cube of idx1 has rowids:

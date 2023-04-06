@@ -74,13 +74,13 @@ class TestXfuncMaxMissingness:
     clean_fact = [8, 3, 2, 9, MAXFLOAT, 7, 1, 5]
     fact_validity = [True, True, True, True, False, True, True, True]
 
-    args = [
+    params = [
         dirty_fact,
         (clean_fact, fact_validity),
         (dirty_fact, fact_validity),
     ]
 
-    @pytest.mark.parametrize("factvar", args)
+    @pytest.mark.parametrize("factvar", params)
     def test_propagate_missing_return_nan(self, factvar):
         # The cube of arr1 has rowids:
         # 0             1
@@ -104,7 +104,7 @@ class TestXfuncMaxMissingness:
         # Cell (1, 1) MUST be missing, because it had no inputs.
         assert arr_eq(maxes, [[7, 9], [float("nan"), float("nan")]])
 
-    @pytest.mark.parametrize("factvar", args)
+    @pytest.mark.parametrize("factvar", params)
     def test_ignore_missing_return_nan(self, factvar):
         # The cube of arr1 has rowids:
         # 0             1
@@ -130,7 +130,7 @@ class TestXfuncMaxMissingness:
         # Cell (1, 1) MUST be missing, because it had no inputs.
         assert arr_eq(maxes, [[7, 9], [8, float("nan")]])
 
-    @pytest.mark.parametrize("factvar", args)
+    @pytest.mark.parametrize("factvar", params)
     def test_propagate_missing_return_validity(self, factvar):
         # The cube of arr1 has rowids:
         # 0             1
@@ -158,7 +158,7 @@ class TestXfuncMaxMissingness:
         assert arr_eq(maxes, [[7, 9], [-1, -1]])
         assert arr_eq(validity, [[True, True], [False, False]])
 
-    @pytest.mark.parametrize("factvar", args)
+    @pytest.mark.parametrize("factvar", params)
     def test_ignore_missing_return_validity(self, factvar):
         # The cube of arr1 has rowids:
         # 0             1

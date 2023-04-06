@@ -229,7 +229,7 @@ class TestXfuncCorrCoefMissingness:
     clean_weights = [9.0, 9.0, 9.0, 9.0, 9.0, 9.0, MAXFLOAT, 9.0]
     weights_validity = [True, True, True, True, True, True, False, True]
 
-    args = [
+    params = [
         [dirty_fact, None],
         [(clean_fact, fact_validity), None],
         [(dirty_fact, fact_validity), None],
@@ -247,7 +247,7 @@ class TestXfuncCorrCoefMissingness:
         [(clean_fact, fact_all_valid), (dirty_weights, weights_validity)],
     ]
 
-    @pytest.mark.parametrize("factvar,weights", args)
+    @pytest.mark.parametrize("factvar,weights", params)
     def test_propagate_missing_return_nan(self, factvar, weights):
         # The cube of arr1 has rowids:
         # 0             1
@@ -304,7 +304,7 @@ class TestXfuncCorrCoefMissingness:
             ],
         )
 
-    @pytest.mark.parametrize("factvar,weights", args)
+    @pytest.mark.parametrize("factvar,weights", params)
     def test_ignore_missing_return_nan(self, factvar, weights):
         # The cube of arr1 has rowids:
         # 0             1
@@ -355,7 +355,7 @@ class TestXfuncCorrCoefMissingness:
             ],
         )
 
-    @pytest.mark.parametrize("factvar,weights", args)
+    @pytest.mark.parametrize("factvar,weights", params)
     def test_propagate_missing_return_validity(self, factvar, weights):
         # The cube of arr1 has rowids:
         # 0             1
@@ -462,7 +462,7 @@ class TestXfuncCorrCoefMissingness:
             ],
         )
 
-    @pytest.mark.parametrize("factvar,weights", args)
+    @pytest.mark.parametrize("factvar,weights", params)
     def test_ignore_missing_return_validity(self, factvar, weights):
         # The cube of arr1 has rowids:
         # 0             1

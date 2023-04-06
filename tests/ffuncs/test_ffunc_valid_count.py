@@ -155,7 +155,7 @@ class TestFfuncValidCountMissingness:
     clean_weights = [9.0, 9.0, MAXFLOAT, 9.0, 9.0]
     weights_validity = [True, True, False, True, True]
 
-    args = [
+    params = [
         [dirty_fact, None],
         [(clean_fact, fact_validity), None],
         [(dirty_fact, fact_validity), None],
@@ -173,7 +173,7 @@ class TestFfuncValidCountMissingness:
         [(clean_fact, fact_all_valid), (dirty_weights, weights_validity)],
     ]
 
-    @pytest.mark.parametrize("factvar,weights", args)
+    @pytest.mark.parametrize("factvar,weights", params)
     def test_propagate_missing_return_nan(self, factvar, weights):
         WT = 1.0 if weights is None else 9.0
         with compare_ccube_to_xcube():
@@ -201,7 +201,7 @@ class TestFfuncValidCountMissingness:
             # Cell (1, 1) MUST be missing, because it had no inputs.
             assert arr_eq(counts, [[2.0 * WT, 1.0 * WT], [float("nan"), float("nan")]])
 
-    @pytest.mark.parametrize("factvar,weights", args)
+    @pytest.mark.parametrize("factvar,weights", params)
     def test_ignore_missing_return_nan(self, factvar, weights):
         WT = 1.0 if weights is None else 9.0
         with compare_ccube_to_xcube():
@@ -229,7 +229,7 @@ class TestFfuncValidCountMissingness:
             # Cell (1, 1) MUST be missing, because it had no inputs.
             assert arr_eq(counts, [[2.0 * WT, 1.0 * WT], [1.0 * WT, float("nan")]])
 
-    @pytest.mark.parametrize("factvar,weights", args)
+    @pytest.mark.parametrize("factvar,weights", params)
     def test_propagate_missing_return_validity(self, factvar, weights):
         WT = 1.0 if weights is None else 9.0
         with compare_ccube_to_xcube():
@@ -261,7 +261,7 @@ class TestFfuncValidCountMissingness:
             assert arr_eq(counts, [[2.0 * WT, 1.0 * WT], [-1, -1]])
             assert arr_eq(validity, [[True, True], [False, False]])
 
-    @pytest.mark.parametrize("factvar,weights", args)
+    @pytest.mark.parametrize("factvar,weights", params)
     def test_ignore_missing_return_validity(self, factvar, weights):
         WT = 1.0 if weights is None else 9.0
         with compare_ccube_to_xcube():
