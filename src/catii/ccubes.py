@@ -307,11 +307,12 @@ class ccube:
                     regions = [region[tuple(flattened_slice)] for region in regions]
 
                 fill_funcs.append(func.fill_func(regions))
-                if self.debug:
-                    print(func, ":=", regions)
 
             subcube.walk(fill_funcs)
             self.intersection_data_points += subcube.intersection_data_points
+            if self.debug:
+                for func, regions in zip(funcs, results):
+                    print(func, ":=", regions)
 
         if self.parallel:
             with closing(multiprocessing.pool.ThreadPool(self.poolsize)) as pool:
@@ -483,5 +484,6 @@ class ccube:
 
             xcube = xcubes.xcube([d.to_array() for d in self.dims])
             xcube_result = xcube.mean(arr, weights, ignore_missing, return_missing_as)
-            assert numpy.allclose(result, xcube_result, equal_nan=True)
+            if not numpy.allclose(result, xcube_result, equal_nan=True):
+                raise AssertionError("ccube %s != xcube %s" % (result, xcube_result))
         return result

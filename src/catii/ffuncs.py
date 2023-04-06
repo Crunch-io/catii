@@ -220,16 +220,16 @@ class ffunc_count(ffunc):
             return (counts,)
         else:
             vcount = numpy.sum(self.validity, axis=0)
+            valid_counts = numpy.zeros(cube.working_shape, dtype=int)
+            valid_counts[cube.corner] = vcount
             if self.ignore_missing:
-                valid_counts = numpy.zeros(cube.working_shape, dtype=int)
-                valid_counts[cube.corner] = vcount
                 return counts, valid_counts
             else:
                 missing_counts = numpy.zeros(cube.working_shape, dtype=int)
                 missing_counts[cube.corner] = (
                     len(self.validity) if self.validity.shape else 1
                 ) - vcount
-                return counts, missing_counts
+                return counts, valid_counts, missing_counts
 
     def fill_func(self, regions):
         """Fill the `regions` arrays with distributions contingent on cube.dims.
@@ -259,7 +259,7 @@ class ffunc_count(ffunc):
             if self.ignore_missing:
                 counts, valid_counts = regions
             else:
-                counts, missing_counts = regions
+                counts, valid_counts, missing_counts = regions
 
             def _fill(x_coords, x_rowids):
                 if tracing:
@@ -267,17 +267,15 @@ class ffunc_count(ffunc):
                 if self.weights.shape:
                     counts[x_coords] = self.weights[x_rowids].sum()
                     vcount = numpy.sum(self.validity[x_rowids], axis=0)
-                    if self.ignore_missing:
-                        valid_counts[x_coords] = vcount
-                    else:
+                    valid_counts[x_coords] = vcount
+                    if not self.ignore_missing:
                         missing_counts[x_coords] = len(x_rowids) - vcount
                 else:
                     # Scalar weight. Broadcast.
                     len_rowids = len(x_rowids)
                     counts[x_coords] = self.weights * len_rowids
-                    if self.ignore_missing:
-                        valid_counts[x_coords] = len_rowids if self.validity else 0
-                    else:
+                    valid_counts[x_coords] = len_rowids if self.validity else 0
+                    if not self.ignore_missing:
                         missing_counts[x_coords] = 0 if self.validity else len_rowids
                 if tracing:
                     tracing["elapsed"] += time.perf_counter() - start
@@ -303,23 +301,27 @@ class ffunc_count(ffunc):
             if self.ignore_missing:
                 counts, valid_counts = regions
             else:
-                counts, missing_counts = regions
+                counts, valid_counts, missing_counts = regions
 
             cube._compute_common_cells_from_marginal_diffs(counts)
             counts = counts[cube.marginless]
 
+            cube._compute_common_cells_from_marginal_diffs(valid_counts)
+            valid_counts = valid_counts[cube.marginless]
+
             if self.ignore_missing:
-                cube._compute_common_cells_from_marginal_diffs(valid_counts)
-                valid_counts = valid_counts[cube.marginless]
-                validity = valid_counts != 0
+                output_is_missing = valid_counts == 0
             else:
                 cube._compute_common_cells_from_marginal_diffs(missing_counts)
                 missing_counts = missing_counts[cube.marginless]
-                validity = missing_counts == 0
-            counts = self.adjust_zeros(counts, new=self.null, condition=~validity)
+                # We have to use valid_counts to mark cells which had no inputs.
+                # We have to use missing_counts to mark cells which had missing
+                # values in their inputs (which ignore_missing can skip).
+                output_is_missing = (valid_counts == 0) | (missing_counts != 0)
+            counts = self.adjust_zeros(counts, self.null, condition=output_is_missing)
 
             if isinstance(self.return_missing_as, tuple):
-                return counts, validity
+                return counts, ~output_is_missing
             else:
                 return counts
 
@@ -395,16 +397,16 @@ class ffunc_valid_count(ffunc):
             return (counts,)
         else:
             vcount = numpy.sum(self.validity, axis=0)
+            valid_counts = numpy.zeros(shape, dtype=dtype)
+            valid_counts[cube.corner] = vcount
             if self.ignore_missing:
-                valid_counts = numpy.zeros(shape, dtype=dtype)
-                valid_counts[cube.corner] = vcount
                 return counts, valid_counts
             else:
                 missing_counts = numpy.zeros(shape, dtype=int)
                 missing_counts[cube.corner] = (
                     len(self.validity) if self.validity.shape else 1
                 ) - vcount
-                return counts, missing_counts
+                return counts, valid_counts, missing_counts
 
     def fill_func(self, regions):
         """Fill the `regions` arrays with distributions contingent on cube.dims.
@@ -420,7 +422,7 @@ class ffunc_valid_count(ffunc):
             if self.ignore_missing:
                 counts, valid_counts = regions
             else:
-                counts, missing_counts = regions
+                counts, valid_counts, missing_counts = regions
 
         def _fill(x_coords, x_rowids):
             if tracing:
@@ -437,9 +439,8 @@ class ffunc_valid_count(ffunc):
             else:
                 # sum(bool array) is faster than count_nonzero(bool array)
                 vcount = numpy.sum(self.validity[x_rowids], axis=0)
-                if self.ignore_missing:
-                    valid_counts[x_coords] = vcount
-                else:
+                valid_counts[x_coords] = vcount
+                if not self.ignore_missing:
                     missing_counts[x_coords] = len(x_rowids) - vcount
             if tracing:
                 tracing["elapsed"] += time.perf_counter() - start
@@ -455,27 +456,29 @@ class ffunc_valid_count(ffunc):
             if self.ignore_missing:
                 counts, valid_counts = regions
             else:
-                counts, missing_counts = regions
+                counts, valid_counts, missing_counts = regions
 
         cube._compute_common_cells_from_marginal_diffs(counts)
         counts = counts[cube.marginless]
 
         if self.return_missing_as == 0:
             counts = self.adjust_zeros(counts, self.null)
-        elif self.ignore_missing:
+        else:
             cube._compute_common_cells_from_marginal_diffs(valid_counts)
             valid_counts = valid_counts[cube.marginless]
-            counts = self.adjust_zeros(counts, self.null, condition=valid_counts == 0)
-        else:
-            cube._compute_common_cells_from_marginal_diffs(missing_counts)
-            missing_counts = missing_counts[cube.marginless]
-            counts = self.adjust_zeros(counts, self.null, condition=missing_counts != 0)
+            if self.ignore_missing:
+                output_is_missing = valid_counts == 0
+            else:
+                cube._compute_common_cells_from_marginal_diffs(missing_counts)
+                missing_counts = missing_counts[cube.marginless]
+                # We have to use valid_counts to mark cells which had no inputs.
+                # We have to use missing_counts to mark cells which had missing
+                # values in their inputs (which ignore_missing can skip).
+                output_is_missing = (valid_counts == 0) | (missing_counts != 0)
+            counts = self.adjust_zeros(counts, self.null, condition=output_is_missing)
 
         if isinstance(self.return_missing_as, tuple):
-            if self.ignore_missing:
-                validity = valid_counts != 0
-            else:
-                validity = missing_counts == 0
+            validity = ~output_is_missing
             return counts, validity
         else:
             return counts
@@ -536,7 +539,10 @@ class ffunc_sum(ffunc):
 
     def get_initial_regions(self, cube):
         """Return NumPy arrays to fill, empty except for corner values."""
-        dtype = self.summables.dtype if self.weights is None else float
+        if self.weights is None and not numpy.isnan(self.null):
+            dtype = self.summables.dtype
+        else:
+            dtype = float
 
         # summables may itself be an N-dimensional numeric array
         shape = cube.working_shape + self.summables.shape[1:]
@@ -544,16 +550,16 @@ class ffunc_sum(ffunc):
         sums[cube.corner] = numpy.nansum(self.summables, axis=0)
 
         vcount = numpy.sum(self.validity, axis=0)
+        valid_counts = numpy.zeros(shape, dtype=int)
+        valid_counts[cube.corner] = vcount
         if self.ignore_missing:
-            valid_counts = numpy.zeros(shape, dtype=dtype)
-            valid_counts[cube.corner] = vcount
             return sums, valid_counts
         else:
             missing_counts = numpy.zeros(shape, dtype=int)
             missing_counts[cube.corner] = (
                 len(self.validity) if self.validity.shape else 1
             ) - vcount
-            return sums, missing_counts
+            return sums, valid_counts, missing_counts
 
     def fill_func(self, regions):
         """Fill the `regions` arrays with distributions contingent on cube.dims.
@@ -566,7 +572,7 @@ class ffunc_sum(ffunc):
         if self.ignore_missing:
             sums, valid_counts = regions
         else:
-            sums, missing_counts = regions
+            sums, valid_counts, missing_counts = regions
 
         def _fill(x_coords, x_rowids):
             if tracing:
@@ -579,9 +585,8 @@ class ffunc_sum(ffunc):
             sums[x_coords] = numpy.sum(self.summables[x_rowids], axis=0)
 
             vcount = numpy.sum(self.validity[x_rowids], axis=0)
-            if self.ignore_missing:
-                valid_counts[x_coords] = vcount
-            else:
+            valid_counts[x_coords] = vcount
+            if not self.ignore_missing:
                 missing_counts[x_coords] = len(x_rowids) - vcount
 
             if tracing:
@@ -595,25 +600,27 @@ class ffunc_sum(ffunc):
         if self.ignore_missing:
             sums, valid_counts = regions
         else:
-            sums, missing_counts = regions
+            sums, valid_counts, missing_counts = regions
 
         cube._compute_common_cells_from_marginal_diffs(sums)
         sums = sums[cube.marginless]
 
+        cube._compute_common_cells_from_marginal_diffs(valid_counts)
+        valid_counts = valid_counts[cube.marginless]
+
         if self.ignore_missing:
-            cube._compute_common_cells_from_marginal_diffs(valid_counts)
-            valid_counts = valid_counts[cube.marginless]
-            sums = self.adjust_zeros(sums, self.null, condition=valid_counts == 0)
+            output_is_missing = valid_counts == 0
         else:
             cube._compute_common_cells_from_marginal_diffs(missing_counts)
             missing_counts = missing_counts[cube.marginless]
-            sums = self.adjust_zeros(sums, self.null, condition=missing_counts != 0)
+            # We have to use valid_counts to mark cells which had no inputs.
+            # We have to use missing_counts to mark cells which had missing
+            # values in their inputs (which ignore_missing can skip).
+            output_is_missing = (valid_counts == 0) | (missing_counts != 0)
+        sums = self.adjust_zeros(sums, self.null, condition=output_is_missing)
 
         if isinstance(self.return_missing_as, tuple):
-            if self.ignore_missing:
-                validity = valid_counts != 0
-            else:
-                validity = missing_counts == 0
+            validity = ~output_is_missing
             return sums, validity
         else:
             return sums
@@ -695,6 +702,9 @@ class ffunc_mean(ffunc):
         else:
             # Keep a third array for marking which output cells
             # have a missing value in the fact variable or a weight.
+            # This is basically a way to mark as missing cells which
+            # have "any missing" input rather than the "all missing"
+            # that you get when ignore_missing is True.
             # Unlike valid_counts, which uses self.countables which is weighted,
             # this uses self.validity which is unweighted.
             missing_counts = numpy.zeros(shape, dtype=int)
@@ -742,27 +752,28 @@ class ffunc_mean(ffunc):
             sums, valid_counts, missing_counts = regions
 
         cube._compute_common_cells_from_marginal_diffs(sums)
-        cube._compute_common_cells_from_marginal_diffs(valid_counts)
-
         sums = sums[cube.marginless]
+
+        cube._compute_common_cells_from_marginal_diffs(valid_counts)
         valid_counts = valid_counts[cube.marginless]
         valid_counts = self.adjust_zeros(valid_counts, new=0)
 
-        with numpy.errstate(divide="ignore", invalid="ignore"):
-            means = sums / valid_counts
-
         if self.ignore_missing:
-            means = self.adjust_zeros(means, self.null, condition=valid_counts == 0)
+            output_is_missing = valid_counts == 0
         else:
             cube._compute_common_cells_from_marginal_diffs(missing_counts)
             missing_counts = missing_counts[cube.marginless]
-            means = self.adjust_zeros(means, self.null, condition=missing_counts != 0)
+            # We have to use valid_counts to mark cells which had no inputs.
+            # We have to use missing_counts to mark cells which had missing
+            # values in their inputs (which ignore_missing can skip).
+            output_is_missing = (valid_counts == 0) | (missing_counts != 0)
+
+        with numpy.errstate(divide="ignore", invalid="ignore"):
+            means = sums / valid_counts
+        means = self.adjust_zeros(means, self.null, condition=output_is_missing)
 
         if isinstance(self.return_missing_as, tuple):
-            if self.ignore_missing:
-                validity = valid_counts != 0
-            else:
-                validity = missing_counts == 0
+            validity = ~output_is_missing
             return means, validity
         else:
             return means
