@@ -1088,12 +1088,12 @@ class xfunc_quantile(xfunc):
         size = qs.shape[0]
         if self.weights is None:
             if coordinates is None:
-                if len(self.arr) and not all(numpy.isnan(self.arr)):
+                if len(self.arr) and not numpy.all(numpy.isnan(self.arr)):
                     qs[:] = self.qfunc(self.arr, self.probability, axis=0)
             else:
                 for i, rowmask in self.bins(coordinates, size):
                     seg = self.arr[rowmask]
-                    if len(seg) and not all(numpy.isnan(seg)):
+                    if len(seg) and not numpy.all(numpy.isnan(seg)):
                         qs[i] = self.qfunc(seg, self.probability, axis=0)
         else:
             if coordinates is None:
@@ -1233,7 +1233,7 @@ class xfunc_op_base(xfunc):
                 for i in range(output_values.shape[0]):
                     rowmask = coordinates == i
                     matches = values[rowmask]
-                    if len(matches) and all(self.validity[rowmask]):
+                    if len(matches) and numpy.all(self.validity[rowmask]):
                         output_values[i] = self.op(matches, axis=0)
                         output_validity[i] = True
 
