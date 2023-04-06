@@ -50,6 +50,7 @@ replace NaN values in the `values` array with 0 in that case. If you prefer
 `sum([])` to return 0, for example, without a second "validity" array,
 pass `return_missing_as=0`.
 """
+import warnings
 
 import numpy
 
@@ -1043,7 +1044,8 @@ class xfunc_quantile(xfunc):
 
         # Set negative weights to 0, like SAS EXCLNPWGT option
         if weights is not None:
-            neg_weights = weights < 0
+            with numpy.errstate(invalid="ignore"):
+                neg_weights = weights < 0
             if neg_weights.any():
                 weights = weights.copy()
                 weights[neg_weights] = 0
@@ -1076,30 +1078,35 @@ class xfunc_quantile(xfunc):
         one which has already been initialized (including any corner values).
         We will compute its common cells from the margins later in self.reduce.
         """
+        warnings.filterwarnings(
+            "ignore",
+            message="Invalid value encountered in percentile",
+            category=RuntimeWarning,
+        )
         (qs,) = self.flat_regions(regions)
 
         size = qs.shape[0]
         if self.weights is None:
             if coordinates is None:
-                if len(self.arr):
+                if len(self.arr) and not all(numpy.isnan(self.arr)):
                     qs[:] = self.qfunc(self.arr, self.probability, axis=0)
             else:
                 for i, rowmask in self.bins(coordinates, size):
                     seg = self.arr[rowmask]
-                    if len(seg):
-                        qs[i] = self.qfunc(self.arr[rowmask], self.probability, axis=0)
+                    if len(seg) and not all(numpy.isnan(seg)):
+                        qs[i] = self.qfunc(seg, self.probability, axis=0)
         else:
             if coordinates is None:
                 qs[:] = self.weighted_quantile(self.arr, self.probability, self.weights)
             else:
                 for i, rowmask in self.bins(coordinates, size):
-                    if self.weights.shape:
-                        w = self.weights[rowmask]
-                    else:
-                        w = numpy.repeat(self.weights, len(rowmask))
-                    qs[i] = self.weighted_quantile(
-                        self.arr[rowmask], self.probability, w
-                    )
+                    seg = self.arr[rowmask]
+                    if len(seg):
+                        if self.weights.shape:
+                            w = self.weights[rowmask]
+                        else:
+                            w = numpy.repeat(self.weights, len(rowmask))
+                        qs[i] = self.weighted_quantile(seg, self.probability, w)
 
     def weighted_quantile(self, arr, probability, weights):
         def weighted_quantile_1d(a):
@@ -1355,7 +1362,9 @@ class xfunc_corrcoef(xfunc):
                 coordinates = coordinates[self.validity]
             size = corrcoefs.shape[0]
             for i, rowmask in self.bins(coordinates, size):
-                corrcoefs[i] = numpy.corrcoef(arr[rowmask], rowvar=False)
+                seg = arr[rowmask]
+                if len(seg):
+                    corrcoefs[i] = numpy.corrcoef(seg, rowvar=False)
 
     def reduce(self, cube, regions):
         """Return `regions` reduced to proper output."""
@@ -1457,13 +1466,16 @@ class xfunc_covariance(xfunc):
                 coordinates = coordinates[self.validity]
             size = covs.shape[0]
             for i, rowmask in self.bins(coordinates, size):
-                if aweights is None:
-                    w = None
-                else:
-                    w = aweights[rowmask]
-                    if len(w) == 0:
-                        continue
-                covs[i] = numpy.cov(arr[rowmask].T, aweights=w)
+                seg = arr[rowmask]
+                if seg.shape[0] > 1 and seg.shape[1] > 1:
+                    if aweights is None:
+                        w = None
+                    else:
+                        w = aweights[rowmask]
+                        if len(w) == 0:
+                            continue
+                    with numpy.errstate(invalid="ignore"):
+                        covs[i] = numpy.cov(seg.T, aweights=w)
 
     def reduce(self, cube, regions):
         """Return `regions` reduced to proper output."""

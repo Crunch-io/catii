@@ -1,5 +1,3 @@
-import sys
-
 import numpy
 import pytest
 
@@ -7,7 +5,7 @@ from catii import ccube, ffuncs, iindex
 
 from .. import arr_eq, compare_ccube_to_xcube
 
-MAXFLOAT = sys.float_info.max
+SENTINEL = 32767
 idx1 = iindex({(1,): [0, 2]}, 0, (5,))  # [1, 0, 1, 0, 0]
 idx2 = iindex({(1,): [0, 3]}, 0, (5,))  # [1, 0, 0, 1, 0]
 wt = numpy.array([0.25, 0.3, 0.99, 1.0, float("nan")])
@@ -176,12 +174,12 @@ class TestFfuncSumMissingness:
     idx_with_empty_cell = iindex({(1,): [3]}, 0, (5,))  # [0, 0, 0, 1, 0]
 
     dirty_fact = [1.0, 2.0, float("nan"), 4.0, 5.0]
-    clean_fact = [1.0, 2.0, MAXFLOAT, 4.0, 5.0]
+    clean_fact = [1.0, 2.0, SENTINEL, 4.0, 5.0]
     fact_validity = [True, True, False, True, True]
     fact_all_valid = [True] * 5
 
     dirty_weights = [9.0, 9.0, float("nan"), 9.0, 9.0]
-    clean_weights = [9.0, 9.0, MAXFLOAT, 9.0, 9.0]
+    clean_weights = [9.0, 9.0, SENTINEL, 9.0, 9.0]
     weights_validity = [True, True, False, True, True]
 
     params = [

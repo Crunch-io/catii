@@ -1,5 +1,4 @@
 import operator
-import sys
 from functools import reduce
 
 import numpy
@@ -11,7 +10,7 @@ from .. import arr_eq
 
 NaN = xfuncs.NaN
 
-MAXFLOAT = sys.float_info.max
+SENTINEL = 32767
 arr1 = [1, 0, 1, 0, 1, 0, 1, 0]  # iindex({(1,): [0, 2, 4, 6]}, 0, (8,))
 arr2 = [1, 0, 0, 1, 0, 0, 1, 0]  # iindex({(1,): [0, 3, 6]}, 0, (8,))
 wt = numpy.array([0.25, 0.3, 0.99, 1.0, NaN, 0.5, 0.75, 0.0])
@@ -222,11 +221,11 @@ class TestXfuncCorrCoefMissingness:
     )
     fact_validity = ~numpy.isnan(dirty_fact)
     clean_fact = dirty_fact.copy()
-    clean_fact[~fact_validity] = MAXFLOAT
+    clean_fact[~fact_validity] = SENTINEL
     fact_all_valid = numpy.ones(clean_fact.shape, dtype=bool)
 
     dirty_weights = [9.0, 9.0, 9.0, 9.0, 9.0, 9.0, float("nan"), 9.0]
-    clean_weights = [9.0, 9.0, 9.0, 9.0, 9.0, 9.0, MAXFLOAT, 9.0]
+    clean_weights = [9.0, 9.0, 9.0, 9.0, 9.0, 9.0, SENTINEL, 9.0]
     weights_validity = [True, True, True, True, True, True, False, True]
 
     params = [
