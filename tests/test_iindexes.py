@@ -4,7 +4,7 @@ import numpy
 import pytest
 
 from catii import iindex
-from catii.iindexes import column_stack
+from catii.iindexes import column_stack, fit_dtype
 
 
 def pytest_raises(exctype, match=None, msg=None):
@@ -761,3 +761,43 @@ class TestColumnStack:
             column_stack((idx0, idx1)).to_array(),
             numpy.column_stack((idx0.to_array(), idx1.to_array())),
         )
+
+
+class TestFitDtype:
+    def test_fit_dtype_uint(self):
+        for pwr in (8, 16, 32):
+            boundary = 2 ** pwr
+            for maxval in range(boundary - 1, boundary + 2):
+                assert numpy.array([maxval], dtype=fit_dtype(maxval))[0] == maxval
+
+    def test_fit_dtype_int_negatives(self):
+        for pwr in (8, 16, 32):
+            boundary = -(2 ** pwr)
+            for minval in range(boundary - 1, boundary + 2):
+                assert numpy.array([minval], dtype=fit_dtype(0, minval))[0] == minval
+
+    def test_fit_dtype_int_positives(self):
+        for pwr in (8, 16, 32):
+            boundary = 2 ** pwr
+            for maxval in range(boundary - 1, boundary + 2):
+                assert numpy.array([maxval], dtype=fit_dtype(maxval, -1))[0] == maxval
+
+    def test_fit_dtype(self):
+        slots = {
+            -(2 ** 31): numpy.int32,
+            -(2 ** 31) - 1: numpy.int64,
+            -(2 ** 32): numpy.int64,
+            -(2 ** 15): numpy.int16,
+            -(2 ** 15) - 1: numpy.int32,
+            -(2 ** 16): numpy.int32,
+            -(2 ** 7): numpy.int8,
+            -(2 ** 7) - 1: numpy.int16,
+            -(2 ** 8): numpy.int16,
+            10: numpy.uint8,
+            32000: numpy.uint16,
+            70000: numpy.uint32,
+            2 ** 32 + 10: numpy.uint64,
+        }
+        for v, expected in slots.items():
+            actual = fit_dtype(v)
+            assert actual == expected, (v, actual, expected)
