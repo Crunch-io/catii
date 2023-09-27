@@ -50,5 +50,6 @@ cluster.json
 TAGS
 *.stats
 *.svg
+*.swp
 
 .DS_Store
