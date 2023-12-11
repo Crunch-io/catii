@@ -1186,7 +1186,7 @@ class xfunc_op_base(xfunc):
             shape = (1,)
 
         dtype = self.values.dtype
-        if dtype is not float:
+        if dtype is not float and dtype.type is not numpy.datetime64:
             try:
                 if numpy.isnan(self.null):
                     dtype = float
