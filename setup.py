@@ -28,7 +28,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="catii",
-    version="1.0.0a13",
+    version="1.0.0a14",
     author="Robert Brewer, Slobodan Ilić",
     author_email="dev@crunch.io",
     description="A library for N-dimensional categorical data.",
