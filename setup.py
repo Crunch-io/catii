@@ -39,7 +39,7 @@ setup(
     package_dir={"": "src"},
     include_package_data=True,
     setup_requires=["setuptools>=18.0", "Cython>=0.20"],
-    install_requires=["numpy>=1.15.2"],
+    install_requires=["numpy>=1.15.2,<2"],
     tests_require=["pytest"],
     ext_modules=ext_modules,
     entry_points={},

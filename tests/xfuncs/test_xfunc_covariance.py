@@ -606,3 +606,49 @@ class TestXfuncCovarianceMissingness:
                 ],
             ],
         )
+
+
+class TestXfuncCovarianceSingleValidRow:
+    """When only 1 row is valid with ignore_missing=True and weights,
+    numpy.cov divides by 0 degrees of freedom. Due to float imprecision
+    in numpy.average(), X-mean is not exactly zero for some values (e.g. 6),
+    so 0/0 becomes tiny/0 = inf instead of nan.
+
+    The result must be all-missing (NaN), not inf.
+    """
+
+    def test_no_dimensions_returns_inf_as_missing(self):
+        """With no dimensions (coordinates=None), single valid row may produce inf.
+
+        The inf is a float imprecision artifact from numpy.cov with 0 degrees
+        of freedom. The evaluation should be skipped and just return nan
+        """
+        arr = numpy.array(
+            [
+                [20.0, 6.0, 1.0, 20.0, 1.0],
+                [NaN, NaN, NaN, NaN, NaN],
+                [NaN, NaN, NaN, NaN, NaN],
+                [NaN, NaN, NaN, NaN, NaN],
+            ]
+        )
+        validity = numpy.array(
+            [
+                [True, True, True, True, True],
+                [False, False, False, False, False],
+                [False, False, False, False, False],
+                [False, False, False, False, False],
+            ]
+        )
+        weights = numpy.array([0.8484, NaN, NaN, NaN])
+        weights_validity = numpy.array([True, False, False, False])
+
+        covs, valid = xcube([]).covariance(
+            (arr, validity),
+            (weights, weights_validity),
+            ignore_missing=True,
+            return_missing_as=(0.0, False),
+        )
+
+        assert not numpy.any(valid), (
+            f"Expected all-missing validity, got: {valid}"
+        )

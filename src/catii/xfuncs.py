@@ -1460,7 +1460,9 @@ class xfunc_covariance(xfunc):
                 aweights = None
 
         if coordinates is None:
-            covs[:] = numpy.cov(arr.T, aweights=aweights)
+            if arr.shape[0] > 1 and arr.shape[1] > 1:
+                covs[:] = numpy.cov(arr.T, aweights=aweights)
+
         else:
             if self.ignore_missing:
                 coordinates = coordinates[self.validity]
