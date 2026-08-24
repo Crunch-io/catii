@@ -114,7 +114,7 @@ class xcube:
         for m, dim in zip(self.multipliers, self.dims):
             sd = dim.astype(self.mintype)
             if m != 1:
-                sd = sd * m
+                sd = sd * self.mintype(m)
             sds.append(sd)
         return sds
 

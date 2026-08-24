@@ -53,3 +53,5 @@ TAGS
 *.swp
 
 .DS_Store
+.venv311/
+.venv314/

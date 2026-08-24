@@ -275,11 +275,11 @@ class xfunc_count(xfunc):
                     )
                     valid_counts[:] = numpy.bincount(
                         coordinates, weights=self.validity, minlength=size
-                    )
+                    ).astype(int)
                     if not self.ignore_missing:
                         missing_counts[:] = numpy.bincount(
                             coordinates, weights=~self.validity, minlength=size
-                        )
+                        ).astype(int)
                 else:
                     bcounts = numpy.bincount(coordinates, minlength=size)
                     counts[:] = bcounts * self.weights
@@ -427,11 +427,11 @@ class xfunc_valid_count(xfunc):
                 else:
                     valid_counts[:] = numpy.bincount(
                         coordinates, weights=self.validity, minlength=size
-                    )
+                    ).astype(int)
                     if not self.ignore_missing:
                         missing_counts[:] = numpy.bincount(
                             coordinates, weights=~self.validity, minlength=size
-                        )
+                        ).astype(int)
             elif self.countables.ndim == 2:
                 # bins() is almost always faster than a bincount of each column.
                 # The exceptions are when the number of columns is low; for example,
@@ -572,11 +572,11 @@ class xfunc_sum(xfunc):
                 )
                 valid_counts[:] = numpy.bincount(
                     coordinates, weights=self.validity, minlength=size
-                )
+                ).astype(int)
                 if not self.ignore_missing:
                     missing_counts[:] = numpy.bincount(
                         coordinates, weights=~self.validity, minlength=size
-                    )
+                    ).astype(int)
             elif self.summables.ndim == 2:
                 # bins() is almost always faster than a bincount of each column.
                 # The exceptions are when the number of columns is low; for example,
@@ -717,7 +717,7 @@ class xfunc_mean(xfunc):
                 if not self.ignore_missing:
                     missing_counts[:] = numpy.bincount(
                         coordinates, weights=~self.validity, minlength=size
-                    )
+                    ).astype(int)
             elif self.summables.ndim == 2:
                 # bins() is almost always faster than a bincount of each column.
                 # The exceptions are when the number of columns is low; for example,
@@ -956,7 +956,7 @@ class xfunc_stddev(xfunc):
         if not self.ignore_missing:
             missing_counts[:] = numpy.bincount(
                 coordinates, weights=~validity, minlength=size
-            )
+            ).astype(int)
 
     def reduce(self, cube, regions):
         """Return `regions` reduced to proper output."""
@@ -1363,7 +1363,9 @@ class xfunc_corrcoef(xfunc):
             size = corrcoefs.shape[0]
             for i, rowmask in self.bins(coordinates, size):
                 seg = arr[rowmask]
-                if len(seg):
+                # Correlation requires at least 2 observations (DoF > 0).
+                # With fewer, the result is mathematically undefined; leave as NaN.
+                if len(seg) >= 2:
                     corrcoefs[i] = numpy.corrcoef(seg, rowvar=False)
 
     def reduce(self, cube, regions):

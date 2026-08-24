@@ -45,7 +45,7 @@ class TestValidate:
     def test_type_errors(self):
         with pytest_raises(
             ValueError,
-            msg="Found index shape with wrong types: {<class 'int'>, <class 'str'>}.",
+            msg="Found index shape with wrong types: [<class 'int'>, <class 'str'>].",
         ):
             iindex({}, 0, ("a", 8)).validate()
 
