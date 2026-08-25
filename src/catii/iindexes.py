@@ -157,13 +157,13 @@ class iindex(dict):
         """
         shape_types = {type(s) for s in self.shape}
         if not shape_types.issubset({int}):
-            raise ValueError("Found index shape with wrong types: %s." % (shape_types,))
+            raise ValueError(f"Found index shape with wrong types: {sorted(shape_types, key=str)}.")
 
         for coords, rowids in self.items():
             for c in coords:
                 if isinstance(c, numpy.generic):
                     raise ValueError(
-                        "Index[%s] contains NumPy coordinate %s." % (coords, c)
+                        f"Index[{tuple(int(x) for x in coords)}] contains NumPy coordinate {int(c)}."
                     )
 
             if coords[0] == self.common:

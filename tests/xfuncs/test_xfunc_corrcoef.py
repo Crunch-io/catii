@@ -87,7 +87,7 @@ class TestXfuncCorrCoefWorkflow:
                     [-1.0, 1.0, -0.32732684],
                     [0.32732684, -0.32732684, 1.0],
                 ],
-                [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]],
+                null_matrix,
             ],
             [
                 [[1.0, -1.0, -1.0], [-1.0, 1.0, 1.0], [-1.0, 1.0, 1.0]],
@@ -117,7 +117,7 @@ class TestXfuncCorrCoefWorkflow:
                     [-1.0, 1.0, 0.97622104],
                     [-0.97622104, 0.97622104, 1.0],
                 ],
-                [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]],
+                null_matrix,
             ],
             [null_matrix, [[1.0, -1.0, NaN], [-1.0, 1.0, NaN], [NaN, NaN, NaN]],],
         ]
@@ -189,7 +189,6 @@ class TestXfuncCorrCoefWorkflow:
         )
         self._test_unweighted_workflow(factvar)
         self._test_weighted_workflow(factvar)
-
 
 class TestXfuncCorrCoefMissingness:
     # Make sure each combination of these options works properly:
