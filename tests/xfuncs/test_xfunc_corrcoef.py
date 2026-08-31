@@ -190,6 +190,7 @@ class TestXfuncCorrCoefWorkflow:
         self._test_unweighted_workflow(factvar)
         self._test_weighted_workflow(factvar)
 
+
 class TestXfuncCorrCoefMissingness:
     # Make sure each combination of these options works properly:
     #  * ignore_missing = True/False
