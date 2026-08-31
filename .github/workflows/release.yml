@@ -48,7 +48,7 @@ jobs:
           NEXUS_USER: ${{ secrets.NEXUS_USER }}
           NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
         run: |
-          twine upload --skip-existing \
+          twine upload \
             --repository-url "https://ui.nexus.crint.net/repository/unstable/" \
             -u "$NEXUS_USER" -p "$NEXUS_PASSWORD" \
             dist/*.whl
