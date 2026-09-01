@@ -1,8 +1,9 @@
-name: Publish catii on PYPI
+name: Publish catii
 
 on:
   release:
     types: [created]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -34,11 +35,20 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install setuptools wheel twine build
-      - name: Build catii
-        run: python -m build --sdist
-      - name: Publish on PYPI
+          pip install setuptools wheel twine build "Cython==3.1.6" "numpy==1.23.5"
+      - name: Build sdist and wheel
+        run: python -m build
+      - name: Publish sdist to PyPI
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_APIKEY }}
-        run: twine upload dist/*
+        run: twine upload --skip-existing dist/*.tar.gz
+      - name: Publish wheel to Nexus unstable
+        env:
+          NEXUS_USER: ${{ secrets.NEXUS_USER }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+        run: |
+          twine upload \
+            --repository-url "https://ui.nexus.crint.net/repository/unstable/" \
+            -u "$NEXUS_USER" -p "$NEXUS_PASSWORD" \
+            dist/*.whl
