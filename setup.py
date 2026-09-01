@@ -28,7 +28,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="catii",
-    version="1.0.3",
+    version="1.0.4.dev1",
     author="Robert Brewer, Slobodan Ilić",
     author_email="dev@crunch.io",
     description="A library for N-dimensional categorical data.",
@@ -39,7 +39,7 @@ setup(
     package_dir={"": "src"},
     include_package_data=True,
     setup_requires=["setuptools>=18.0", "Cython>=0.20"],
-    install_requires=["numpy>=1.15.2,<2"],
+    install_requires=["numpy>=1.15.2"],
     tests_require=["pytest"],
     ext_modules=ext_modules,
     entry_points={},
