@@ -24,3 +24,22 @@ jobs:
           pip install -e .
       - name: Test
         run: pytest tests/ -q
+
+  test-numpy1:
+    # Explicitly exercise the numpy 1.x line (what production still runs).
+    # catii claims numpy 1.x AND 2.x compatibility; the matrix job above only
+    # installs the latest numpy (2.x), so this job guards the 1.x side.
+    # Does not change catii's declared deps — it just pins numpy<2 for the run.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install (numpy 1.x)
+        run: |
+          pip install --upgrade pip
+          pip install "numpy<2" Cython pytest
+          pip install -e .
+      - name: Test
+        run: pytest tests/ -q
