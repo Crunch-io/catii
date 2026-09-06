@@ -8,19 +8,34 @@ on:
 
 jobs:
   test:
+    name: test (py${{ matrix.python-version }}, numpy${{ matrix.numpy }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.11", "3.14"]
+        # setup.py used to have numpy>=1.15.2 but with a cap of <2. The cap has
+        # been removed to allow packages that reference catii (such as zz9d) to
+        # decide which numpy to use (1 or 2). An unpinned install of catii from
+        # both pythons (3.11 and 3.14) will result in the installation of numpy
+        # 2, because that's what public PyPI will resolve to. In the context of
+        # zz9d workflows it will still be numpy 1 - because that's what's (still)
+        # pinned from its (zz9d's) dependencies.
+        numpy: ["1", "2"]
+        exclude:
+          # numpy only added Python 3.14 support in its 2.x line; no numpy 1.x
+          # release installs on 3.14, so this combination would fail - skip it.
+          - python-version: "3.14"
+            numpy: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install
+      - name: Install (numpy ${{ matrix.numpy }}.x)
         run: |
           pip install --upgrade pip
-          pip install numpy Cython pytest
+          pip install "numpy>=${{ matrix.numpy }},<$(( ${{ matrix.numpy }} + 1 ))" Cython pytest
           pip install -e .
       - name: Test
         run: pytest tests/ -q
