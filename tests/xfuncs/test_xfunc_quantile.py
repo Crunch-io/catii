@@ -281,3 +281,86 @@ class TestXfuncQuantileMissingness:
         # Cell (1, 1) MUST be missing, because it had no inputs.
         assert arr_eq(qs, [[3.5 if weights is None else 2.0, 4.0], [1.0, -1]])
         assert arr_eq(validity, [[True, True], [True, False]])
+
+
+class TestXfuncQuantileArgsortTieOrder:
+    """Reproduces the weighted-quantile non-determinism across numpy versions.
+
+    weighted_quantile_1d sorts fact values with a bare ``a.argsort()``, whose
+    order for TIED values is unspecified. The parallel weights are reordered to
+    match, so when equal values carry different weights the tie order changes
+    which weight lands at the quantile boundary -> a different (but still valid)
+    interpolated result.
+
+    numpy 2.4.0 retired the separate heapsort implementation and mapped the
+    'heapsort' kind onto quicksort, which changed the tie order vs numpy 1.x.
+    On the data below (many tied 60.0 / 70.0 values with differing weights) the
+    0.25 quantile therefore differs:
+
+        numpy 1.x : 58.56617647058823   (the historical / expected value)
+        numpy 2.x : 55.88383838383838
+
+    This test asserts the numpy-1 value, so it PASSES under numpy 1 and FAILS
+    under numpy 2 - making the regression visible in the CI matrix. The fix is
+    a deterministic tie-break in weighted_quantile_1d:
+
+        ind = numpy.lexsort((w, a))   # sort by value, break ties by weight
+
+    which yields 58.566... on both numpy versions (verified). Once that lands,
+    this test passes everywhere and the note can be removed.
+    """
+
+    # Single-cell cube (all rows in coordinate 0).
+    idx = [0] * 20
+    fact = [
+        90.0,
+        float("nan"),
+        float("nan"),
+        float("nan"),
+        60.0,
+        40.0,
+        50.0,
+        60.0,
+        60.0,
+        70.0,
+        70.0,
+        70.0,
+        70.0,
+        50.0,
+        70.0,
+        30.0,
+        60.0,
+        40.0,
+        70.0,
+        10.0,
+    ]
+    weights = [
+        0.0,
+        0.7366666666666667,
+        0.0,
+        1.0725,
+        1.0725,
+        0.0,
+        0.0,
+        1.43,
+        0.7366666666666667,
+        1.0725,
+        0.0,
+        0.7366666666666667,
+        0.7366666666666667,
+        0.7366666666666667,
+        1.0725,
+        0.0,
+        0.7366666666666667,
+        0.0,
+        1.43,
+        1.43,
+    ]
+
+    def test_weighted_quantile_tie_order_is_deterministic(self):
+        qs = xcube([self.idx]).quantile(
+            self.fact, 0.25, self.weights, ignore_missing=True
+        )
+        # The historically-correct (numpy 1.x) value. Under numpy 2.x the
+        # unstable argsort tie-order currently yields 55.88383838383838 instead.
+        assert arr_eq(qs, [58.56617647058823])
