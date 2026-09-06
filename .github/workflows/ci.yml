@@ -20,12 +20,11 @@ jobs:
         # both pythons (3.11 and 3.14) will result in the installation of numpy
         # 2, because that's what public PyPI will resolve to. In the context of
         # zz9d workflows it will still be numpy 1 - because that's what's (still)
-        # pinned from its (zz9d's) dependencies (and also because that's what's
-        # available on the private Nexus PyPI).
+        # pinned from its (zz9d's) dependencies.
         numpy: ["1", "2"]
         exclude:
-          # Python 3.14 requires numpy >= 2 by definition, so a numpy 1
-          # installation would fail - that's why we skip this combination.
+          # numpy only added Python 3.14 support in its 2.x line; no numpy 1.x
+          # release installs on 3.14, so this combination would fail - skip it.
           - python-version: "3.14"
             numpy: "1"
     steps:
