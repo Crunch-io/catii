@@ -13,23 +13,24 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.14"]
-        # numpy "1" -> latest 1.x, "2" -> latest 2.x. catii supports both
-        # (setup.py: numpy>=1.15.2), so exercise both across Pythons.
-        numpy: ["1", "2"]
+        # catii supports both numpy lines (setup.py: numpy>=1.15.2), so exercise
+        # both across Pythons. Values are self-describing so the job name reads
+        # e.g. "test (3.11, numpy2)".
+        numpy: ["numpy1", "numpy2"]
         exclude:
           # numpy 1.x has no wheels for Python 3.14 (1.x predates 3.14 support),
           # so this combination cannot be installed.
           - python-version: "3.14"
-            numpy: "1"
+            numpy: "numpy1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install (numpy ${{ matrix.numpy }}.x)
+      - name: Install (${{ matrix.numpy }})
         run: |
           pip install --upgrade pip
-          if [ "${{ matrix.numpy }}" = "1" ]; then
+          if [ "${{ matrix.numpy }}" = "numpy1" ]; then
             pip install "numpy<2" Cython pytest
           else
             pip install "numpy>=2" Cython pytest
