@@ -129,7 +129,11 @@ class TestXfuncQuantileWeights:
 
     def test_argsort_tie_order(self):
         a = numpy.array([70.0, 70.0, 60.0, 60.0, 70.0, 60.0])
-        assert a.argsort().tolist() == [2, 3, 5, 0, 1, 4]
+        w = numpy.array([1.43, 0.0, 1.07, 0.73, 1.07, 0.73])
+        # a.argsort() leaves tied values in an unspecified order that differs
+        # across numpy versions; lexsort breaks ties by weight, deterministically.
+        # assert a.argsort().tolist() == [2, 3, 5, 0, 1, 4]
+        assert numpy.lexsort((w, a)).tolist() == [3, 5, 2, 1, 4, 0]
 
     def test_weighted_quantile_tie_order_is_deterministic(self):
         qs = xcube([[0, 0, 0, 0, 0, 0]]).quantile(
@@ -138,7 +142,10 @@ class TestXfuncQuantileWeights:
             [1.43, 0.0, 1.07, 0.73, 1.07, 0.73],
             ignore_missing=True,
         )
-        assert arr_eq(qs, [63.41258741258741])
+        # argsort tie-order gave 63.41258741258741 on numpy 1 (55.88... on
+        # numpy 2); lexsort makes it a single deterministic value on both.
+        # assert arr_eq(qs, [63.41258741258741])
+        assert arr_eq(qs, [70.0])
 
 
 class TestXfuncQuantileMissingness:

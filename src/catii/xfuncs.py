@@ -1105,14 +1105,14 @@ class xfunc_quantile(xfunc):
                         if self.weights.shape:
                             w = self.weights[rowmask]
                         else:
-                            w = numpy.repeat(self.weights, len(rowmask))
+                            w = numpy.repeat(self.weights, len(seg))
                         qs[i] = self.weighted_quantile(seg, self.probability, w)
 
     def weighted_quantile(self, arr, probability, weights):
         def weighted_quantile_1d(a):
             w = weights
 
-            ind = a.argsort()
+            ind = numpy.lexsort((w, a))
             a = a[ind]
             w = w[ind]
 
