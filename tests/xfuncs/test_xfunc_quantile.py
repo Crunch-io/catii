@@ -127,6 +127,19 @@ class TestXfuncQuantileWeights:
         )
         assert arr_eq(qs, [float("nan"), float("nan")])
 
+    def test_argsort_tie_order(self):
+        a = numpy.array([70.0, 70.0, 60.0, 60.0, 70.0, 60.0])
+        assert a.argsort().tolist() == [2, 3, 5, 0, 1, 4]
+
+    def test_weighted_quantile_tie_order_is_deterministic(self):
+        qs = xcube([[0, 0, 0, 0, 0, 0]]).quantile(
+            [70.0, 70.0, 60.0, 60.0, 70.0, 60.0],
+            0.6,
+            [1.43, 0.0, 1.07, 0.73, 1.07, 0.73],
+            ignore_missing=True,
+        )
+        assert arr_eq(qs, [63.41258741258741])
+
 
 class TestXfuncQuantileMissingness:
     # Make sure each combination of these options works properly:
