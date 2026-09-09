@@ -901,6 +901,8 @@ class xfunc_stddev(xfunc):
                 squared_variances = (squared_variances.T * weights).T
 
             varsums = numpy.nansum(squared_variances, axis=0)
+            if numpy.isinf(varsums):
+                varsums = 0
 
             with numpy.errstate(divide="ignore", invalid="ignore"):
                 if weights is None:
@@ -943,6 +945,9 @@ class xfunc_stddev(xfunc):
         if weights is not None:
             squared_variances = (squared_variances.T * weights).T
         varsums = numpy.bincount(coords, weights=squared_variances, minlength=size)
+        # Replace inf with 0. Inf values can occur if input extreme
+        # values are present and those cause overflow in squared_variances.
+        varsums = numpy.where(numpy.isinf(varsums), 0, varsums)
         N = numpy.bincount(coords, minlength=size)
 
         with numpy.errstate(divide="ignore", invalid="ignore"):
