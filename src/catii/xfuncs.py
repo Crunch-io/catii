@@ -901,6 +901,11 @@ class xfunc_stddev(xfunc):
                 squared_variances = (squared_variances.T * weights).T
 
             varsums = numpy.nansum(squared_variances, axis=0)
+
+            # Replace inf with 0. Inf values can occur if input extreme
+            # values are present and those cause overflow in squared_variances.
+            # 0 is used because it would be the same value as the squared_variances
+            # have all nan.
             if numpy.isinf(varsums):
                 varsums = 0
 
