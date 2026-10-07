@@ -8,6 +8,7 @@ from functools import reduce
 import numpy
 
 from . import xfuncs
+from . import composite_xfunc as cx
 
 BIG_REGIONS = 1 << 30  # 1G, max input data size before we use threads <shrug>
 
@@ -174,16 +175,20 @@ class xcube:
                 "multipliers:",
                 self.multipliers,
             )
-        results = [func.get_initial_regions(self) for func in funcs]
+
+        # Group compatible xfuncs to share intermediate computations
+        grouped_funcs, original_to_grouped = self._group_compatible_funcs(funcs)
+
+        results = [func.get_initial_regions(self) for func in grouped_funcs]
         if self.debug:
             print("INITIAL REGIONS:")
-            for func, regions in zip(funcs, results):
+            for func, regions in zip(grouped_funcs, results):
                 print(func, ":", regions)
 
         strided_dims = self.strided_dims()
 
         self._tracing = {}
-        for f in funcs:
+        for f in grouped_funcs:
             # Collect tracing for each xfunc (possibly running concurrently).
             self._tracing[f] = {"elapsed": 0.0, "start": None, "count": 0}
 
@@ -205,7 +210,7 @@ class xcube:
 
             if self.debug:
                 print("FILL SUBCUBE:", nested_coords)
-            for func, regions in zip(funcs, results):
+            for func, regions in zip(grouped_funcs, results):
                 start = time.time()
 
                 if flattened_slice:
@@ -215,7 +220,14 @@ class xcube:
                     # Form a view of this region to pass to each measure,
                     # so the xfuncs themselves don't have to know about
                     # our outer dimensions.
-                    regions = [region[tuple(flattened_slice)] for region in regions]
+                    if isinstance(func, cx.CompositeXfunc):
+                        # CompositeXfunc has a list of regions (one per wrapped xfunc)
+                        regions = [
+                            tuple(r[tuple(flattened_slice)] for r in xfunc_regions)
+                            for xfunc_regions in regions
+                        ]
+                    else:
+                        regions = [region[tuple(flattened_slice)] for region in regions]
 
                 func.fill(coordinates, regions)
                 if self.debug:
@@ -238,11 +250,63 @@ class xcube:
             for nested_coords in self.product:
                 fill_one_cube(nested_coords)
 
-        output = [func.reduce(self, regions) for func, regions in zip(funcs, results)]
+        # Reduce grouped funcs
+        grouped_output = [
+            func.reduce(self, regions)
+            for func, regions in zip(grouped_funcs, results)
+        ]
+
+        # Unpack results back to original order
+        output = self._unpack_grouped_results(
+            funcs, grouped_funcs, grouped_output, original_to_grouped
+        )
+
         if self.debug:
             print("OUTPUT:")
-            for func, regions in zip(funcs, output):
-                print(func, ":", regions)
+            for func, result in zip(funcs, output):
+                print(func, ":", result)
+        return output
+
+    def _group_compatible_funcs(self, funcs):
+        """Group compatible xfuncs to share intermediate computations.
+
+        Returns:
+            grouped_funcs: List of xfuncs/CompositeXfuncs to actually compute
+            original_to_grouped: Dict mapping original func index to
+                                 (grouped_func_index, sub_index or None)
+        """
+        groups = cx.group_xfuncs(funcs)
+
+        grouped_funcs = []
+        original_to_grouped = {}
+
+        for group in groups:
+            if len(group) == 1:
+                # Single xfunc, no grouping needed
+                original_idx = funcs.index(group[0])
+                original_to_grouped[original_idx] = (len(grouped_funcs), None)
+                grouped_funcs.append(group[0])
+            else:
+                # Multiple compatible xfuncs, create a CompositeXfunc
+                composite = cx.CompositeXfunc(group)
+                grouped_idx = len(grouped_funcs)
+                for sub_idx, xfunc in enumerate(group):
+                    original_idx = funcs.index(xfunc)
+                    original_to_grouped[original_idx] = (grouped_idx, sub_idx)
+                grouped_funcs.append(composite)
+
+        return grouped_funcs, original_to_grouped
+
+    def _unpack_grouped_results(self, funcs, grouped_funcs, grouped_output, original_to_grouped):
+        """Unpack grouped results back to the original order."""
+        output = []
+        for i in range(len(funcs)):
+            grouped_idx, sub_idx = original_to_grouped[i]
+            result = grouped_output[grouped_idx]
+            if sub_idx is not None:
+                # This was part of a CompositeXfunc, extract the sub-result
+                result = result[sub_idx]
+            output.append(result)
         return output
 
     # -------------------------------- xfuncs -------------------------------- #
