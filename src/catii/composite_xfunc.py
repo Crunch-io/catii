@@ -192,84 +192,68 @@ XFUNC_FILL_STRATEGIES = {
 # Grouping logic
 # =============================================================================
 
+# Types that can share intermediate computations
+COMPATIBLE_XFUNC_TYPES = {"xfunc_mean", "xfunc_stddev", "xfunc_valid_count", "xfunc_sum"}
+
 
 def can_share_intermediates(xfunc1, xfunc2):
     """Check if two xfuncs can share intermediate computations.
 
-    They can share if they operate on the same fact variable with the
-    same weights and ignore_missing setting.
+    They can share if they:
+    1. Are both compatible types
+    2. Have the same weights array (identity, since xfuncs don't copy weights)
+    3. Have the same ignore_missing setting
+    4. Have equal validity arrays
+    5. Have equal summables arrays
     """
-    compatible_types = {"xfunc_mean", "xfunc_stddev", "xfunc_valid_count", "xfunc_sum"}
     type1 = type(xfunc1).__name__
     type2 = type(xfunc2).__name__
 
-    if type1 not in compatible_types or type2 not in compatible_types:
+    if type1 not in COMPATIBLE_XFUNC_TYPES or type2 not in COMPATIBLE_XFUNC_TYPES:
         return False
 
-    # Check weights identity (weights is NOT copied by xfuncs)
-    w1 = getattr(xfunc1, "weights", None)
-    w2 = getattr(xfunc2, "weights", None)
-    if (w1 is None) != (w2 is None):
-        return False
-    if w1 is not None and w1 is not w2:
+    # Weights are not copied by xfuncs, so identity check is appropriate
+    if getattr(xfunc1, "weights", None) is not getattr(xfunc2, "weights", None):
         return False
 
-    # Check ignore_missing
-    im1 = getattr(xfunc1, "ignore_missing", False)
-    im2 = getattr(xfunc2, "ignore_missing", False)
-    if im1 != im2:
+    if getattr(xfunc1, "ignore_missing", False) != getattr(xfunc2, "ignore_missing", False):
         return False
 
-    # Check validity shape and values
+    # Validity arrays are derived from factvar, need value comparison
     v1 = getattr(xfunc1, "validity", None)
     v2 = getattr(xfunc2, "validity", None)
     if v1 is None or v2 is None:
         return False
-    if getattr(v1, "shape", None) != getattr(v2, "shape", None):
-        return False
-    if not numpy.array_equal(v1, v2):
+    if v1.shape != v2.shape or not numpy.array_equal(v1, v2):
         return False
 
-    # Check countables are equal
+    # Countables must both exist and match, or both not exist
     c1 = getattr(xfunc1, "countables", None)
     c2 = getattr(xfunc2, "countables", None)
-    if c1 is None or c2 is None:
+    if (c1 is None) != (c2 is None):
         return False
-    if getattr(c1, "shape", None) != getattr(c2, "shape", None):
-        return False
-    if not numpy.allclose(c1, c2, equal_nan=True):
-        return False
-
-    # Check that the actual values (wsummables/summables) are the same
-    # This catches the case where countables match but values differ
-    def get_wsummables(xf):
-        if hasattr(xf, "wsummables"):
-            return xf.wsummables
-        elif hasattr(xf, "summables"):
-            return xf.summables
-        return None
-
-    ws1 = get_wsummables(xfunc1)
-    ws2 = get_wsummables(xfunc2)
-
-    # If both have wsummables, they must be equal on valid positions
-    if ws1 is not None and ws2 is not None:
-        if ws1.shape != ws2.shape:
+    if c1 is not None and c2 is not None:
+        if c1.shape != c2.shape or not numpy.allclose(c1, c2, equal_nan=True):
             return False
-        # Compare only valid positions (where neither is NaN)
-        valid_mask = ~(numpy.isnan(ws1) | numpy.isnan(ws2))
-        if valid_mask.any():
-            if not numpy.allclose(ws1[valid_mask], ws2[valid_mask]):
-                return False
-        # Also check that NaN positions match
-        if not numpy.array_equal(numpy.isnan(ws1), numpy.isnan(ws2)):
-            return False
-    elif (ws1 is None) != (ws2 is None):
-        # One has values, one doesn't: can still share countables
-        # but this is an edge case (e.g., valid_count vs mean)
-        pass
 
-    return True
+    # Summables are derived from factvar, need value comparison
+    def get_summables(xf):
+        ws = getattr(xf, "wsummables", None)
+        if ws is not None:
+            return ws
+        return getattr(xf, "summables", None)
+
+    s1 = get_summables(xfunc1)
+    s2 = get_summables(xfunc2)
+
+    if s1 is None and s2 is None:
+        return True
+    if s1 is None or s2 is None:
+        return True  # One has values, one doesn't (e.g., valid_count vs mean)
+    if s1.shape != s2.shape:
+        return False
+
+    return numpy.allclose(s1, s2, equal_nan=True)
 
 
 def group_xfuncs(xfuncs):
