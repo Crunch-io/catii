@@ -57,49 +57,6 @@ import numpy
 
 
 # =============================================================================
-# Intermediate computation functions
-# =============================================================================
-
-def compute_N(coords, size):
-    """Compute unweighted count per bin."""
-    return numpy.bincount(coords, minlength=size)[:size]
-
-
-def compute_valid_counts(coords, size, countables):
-    """Compute weighted valid counts per bin."""
-    return numpy.bincount(coords, weights=countables, minlength=size)[:size]
-
-
-def compute_missing_counts(coords, size, validity):
-    """Compute count of missing values per bin."""
-    return numpy.bincount(coords, weights=~validity, minlength=size)[:size].astype(int)
-
-
-def compute_value_sums(coords, size, wsummables):
-    """Compute weighted value sums per bin."""
-    return numpy.bincount(coords, weights=wsummables, minlength=size)[:size]
-
-
-def compute_weight_sums(coords, size, weights):
-    """Compute sum of weights per bin."""
-    return numpy.bincount(coords, weights=weights, minlength=size)[:size]
-
-
-def compute_means(value_sums, valid_counts):
-    """Compute means from sums and counts."""
-    with numpy.errstate(divide="ignore", invalid="ignore"):
-        return value_sums / valid_counts
-
-
-def compute_variance_sums(coords, size, summables, means, weights=None):
-    """Compute sum of squared deviations per bin."""
-    squared_variances = (summables - means[coords]) ** 2
-    if weights is not None:
-        squared_variances = squared_variances * weights
-    return numpy.bincount(coords, weights=squared_variances, minlength=size)[:size]
-
-
-# =============================================================================
 # What intermediates each xfunc type needs
 # =============================================================================
 
@@ -116,6 +73,118 @@ XFUNC_REQUIREMENTS = {
         "means",
         "variance_sums",
     ],
+}
+
+
+# =============================================================================
+# Strategy classes for filling xfunc regions
+# =============================================================================
+
+
+class XfuncFillStrategy:
+    """Base class for xfunc fill strategies.
+
+    Each strategy knows how to fill regions for a specific xfunc type
+    from a cache of precomputed intermediates.
+    """
+
+    def fill_regions(self, xfunc, regions, cache, weights, col=None):
+        """Fill xfunc regions from cache.
+
+        Args:
+            xfunc: The xfunc instance being filled.
+            regions: Tuple of region arrays to fill.
+            cache: Dict of precomputed intermediate values.
+            weights: Weights array or None.
+            col: Column index for 2D case, or None for 1D case.
+        """
+        raise NotImplementedError
+
+    def _set_region(self, arr, value, col):
+        """Set region array values, handling 1D vs 2D indexing."""
+        if col is None:
+            arr[:] = value
+        else:
+            arr[:, col] = value
+
+
+class MeanFillStrategy(XfuncFillStrategy):
+    """Strategy for filling mean xfunc regions."""
+
+    def fill_regions(self, xfunc, regions, cache, weights, col=None):
+        if xfunc.ignore_missing:
+            sums, valid_counts = regions
+        else:
+            sums, valid_counts, missing_counts = regions
+
+        self._set_region(sums, cache["value_sums"], col)
+        self._set_region(valid_counts, cache["valid_counts"], col)
+        if not xfunc.ignore_missing:
+            self._set_region(missing_counts, cache.get("missing_counts", 0), col)
+
+
+class StddevFillStrategy(XfuncFillStrategy):
+    """Strategy for filling stddev xfunc regions."""
+
+    def fill_regions(self, xfunc, regions, cache, weights, col=None):
+        if xfunc.ignore_missing:
+            stddevs, valid_counts = regions
+        else:
+            stddevs, valid_counts, missing_counts = regions
+
+        N = cache["N"]
+        varsums = cache.get("variance_sums")
+        weight_sums = cache.get("weight_sums")
+
+        if varsums is not None:
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                if weights is None:
+                    stddev_values = numpy.sqrt(varsums / (N - 1))
+                else:
+                    stddev_values = numpy.sqrt((varsums / weight_sums) * (N / (N - 1)))
+                self._set_region(stddevs, stddev_values, col)
+
+        self._set_region(valid_counts, N, col)
+        if not xfunc.ignore_missing:
+            self._set_region(missing_counts, cache.get("missing_counts", 0), col)
+
+
+class SumFillStrategy(XfuncFillStrategy):
+    """Strategy for filling sum xfunc regions."""
+
+    def fill_regions(self, xfunc, regions, cache, weights, col=None):
+        if xfunc.ignore_missing:
+            sums, valid_counts = regions
+        else:
+            sums, valid_counts, missing_counts = regions
+
+        self._set_region(sums, cache["value_sums"], col)
+        self._set_region(valid_counts, cache["N"], col)
+        if not xfunc.ignore_missing:
+            self._set_region(missing_counts, cache.get("missing_counts", 0), col)
+
+
+class ValidCountFillStrategy(XfuncFillStrategy):
+    """Strategy for filling valid_count xfunc regions."""
+
+    def fill_regions(self, xfunc, regions, cache, weights, col=None):
+        if xfunc.ignore_missing:
+            counts, valid_counts = regions
+        else:
+            counts, valid_counts, missing_counts = regions
+
+        self._set_region(counts, cache["valid_counts"], col)
+        self._set_region(valid_counts, cache["N"], col)
+        if not xfunc.ignore_missing:
+            self._set_region(missing_counts, cache.get("missing_counts", 0), col)
+
+
+# Registry mapping xfunc type names to their fill strategies
+XFUNC_FILL_STRATEGIES = {
+    "xfunc_mean": MeanFillStrategy(),
+    "xfunc_stddev": StddevFillStrategy(),
+    "xfunc_sum": SumFillStrategy(),
+    "xfunc_valid_count": ValidCountFillStrategy(),
 }
 
 
@@ -350,7 +419,8 @@ class CompositeXfunc:
             cache["weight_sums"] = numpy.sum(self.weights, axis=0)
 
         if "means" in self.required_intermediates and "value_sums" in cache:
-            cache["means"] = compute_means(cache["value_sums"], cache["valid_counts"])
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                cache["means"] = cache["value_sums"] / cache["valid_counts"]
 
         if "variance_sums" in self.required_intermediates and self.summables is not None:
             means = cache.get("means")
@@ -382,42 +452,48 @@ class CompositeXfunc:
                 cache = self._compute_intermediates_1d_column(coordinates, size, col)
                 for xfunc, regions in zip(self.xfuncs, all_regions):
                     flat_regs = xfunc.flat_regions(regions)
-                    self._fill_xfunc_regions_column(xfunc, flat_regs, cache, col)
+                    self._fill_xfunc_regions(xfunc, flat_regs, cache, col)
 
     def _compute_intermediates_1d(self, coordinates, size):
         """Compute all required intermediates for 1D case."""
         cache = {}
 
         if "N" in self.required_intermediates:
-            cache["N"] = compute_N(coordinates, size)
+            cache["N"] = numpy.bincount(coordinates, minlength=size)[:size]
 
         if "valid_counts" in self.required_intermediates:
-            cache["valid_counts"] = compute_valid_counts(
-                coordinates, size, self.countables
-            )
+            cache["valid_counts"] = numpy.bincount(
+                coordinates, weights=self.countables, minlength=size
+            )[:size]
 
         if "missing_counts" in self.required_intermediates:
-            cache["missing_counts"] = compute_missing_counts(
-                coordinates, size, self.validity
-            )
+            cache["missing_counts"] = numpy.bincount(
+                coordinates, weights=~self.validity, minlength=size
+            )[:size].astype(int)
 
         if "value_sums" in self.required_intermediates and self.wsummables is not None:
-            cache["value_sums"] = compute_value_sums(
-                coordinates, size, self.wsummables
-            )
+            cache["value_sums"] = numpy.bincount(
+                coordinates, weights=self.wsummables, minlength=size
+            )[:size]
 
         if "weight_sums" in self.required_intermediates and self.weights is not None:
-            cache["weight_sums"] = compute_weight_sums(coordinates, size, self.weights)
+            cache["weight_sums"] = numpy.bincount(
+                coordinates, weights=self.weights, minlength=size
+            )[:size]
 
         if "means" in self.required_intermediates and "value_sums" in cache:
-            cache["means"] = compute_means(cache["value_sums"], cache["valid_counts"])
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                cache["means"] = cache["value_sums"] / cache["valid_counts"]
 
         if "variance_sums" in self.required_intermediates and self.summables is not None:
             means = cache.get("means")
             if means is not None:
-                cache["variance_sums"] = compute_variance_sums(
-                    coordinates, size, self.summables, means, self.weights
-                )
+                squared_variances = (self.summables - means[coordinates]) ** 2
+                if self.weights is not None:
+                    squared_variances = squared_variances * self.weights
+                cache["variance_sums"] = numpy.bincount(
+                    coordinates, weights=squared_variances, minlength=size
+                )[:size]
 
         return cache
 
@@ -427,179 +503,57 @@ class CompositeXfunc:
 
         if "N" in self.required_intermediates:
             # N is the same for all columns
-            cache["N"] = compute_N(coordinates, size)
+            cache["N"] = numpy.bincount(coordinates, minlength=size)[:size]
 
         if "valid_counts" in self.required_intermediates:
-            cache["valid_counts"] = compute_valid_counts(
-                coordinates, size, self.countables[:, col]
-            )
+            cache["valid_counts"] = numpy.bincount(
+                coordinates, weights=self.countables[:, col], minlength=size
+            )[:size]
 
         if "missing_counts" in self.required_intermediates:
-            cache["missing_counts"] = compute_missing_counts(
-                coordinates, size, self.validity[:, col]
-            )
+            cache["missing_counts"] = numpy.bincount(
+                coordinates, weights=~self.validity[:, col], minlength=size
+            )[:size].astype(int)
 
         if "value_sums" in self.required_intermediates and self.wsummables is not None:
-            cache["value_sums"] = compute_value_sums(
-                coordinates, size, self.wsummables[:, col]
-            )
+            cache["value_sums"] = numpy.bincount(
+                coordinates, weights=self.wsummables[:, col], minlength=size
+            )[:size]
 
         if "weight_sums" in self.required_intermediates and self.weights is not None:
-            cache["weight_sums"] = compute_weight_sums(coordinates, size, self.weights)
+            cache["weight_sums"] = numpy.bincount(
+                coordinates, weights=self.weights, minlength=size
+            )[:size]
 
         if "means" in self.required_intermediates and "value_sums" in cache:
-            cache["means"] = compute_means(cache["value_sums"], cache["valid_counts"])
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                cache["means"] = cache["value_sums"] / cache["valid_counts"]
 
         if "variance_sums" in self.required_intermediates and self.summables is not None:
             means = cache.get("means")
             if means is not None:
-                cache["variance_sums"] = compute_variance_sums(
-                    coordinates, size, self.summables[:, col], means, self.weights
-                )
+                squared_variances = (self.summables[:, col] - means[coordinates]) ** 2
+                if self.weights is not None:
+                    squared_variances = squared_variances * self.weights
+                cache["variance_sums"] = numpy.bincount(
+                    coordinates, weights=squared_variances, minlength=size
+                )[:size]
 
         return cache
 
-    def _fill_xfunc_regions(self, xfunc, regions, cache):
-        """Fill one xfunc's regions from the cache."""
+    def _fill_xfunc_regions(self, xfunc, regions, cache, col=None):
+        """Fill one xfunc's regions from the cache.
+        
+        Args:
+            xfunc: The xfunc instance being filled.
+            regions: Tuple of region arrays to fill.
+            cache: Dict of precomputed intermediate values.
+            col: Column index for 2D case, or None for 1D case.
+        """
         xfunc_name = type(xfunc).__name__
-
-        if xfunc_name == "xfunc_mean":
-            self._fill_mean_regions(xfunc, regions, cache)
-        elif xfunc_name == "xfunc_stddev":
-            self._fill_stddev_regions(xfunc, regions, cache)
-        elif xfunc_name == "xfunc_sum":
-            self._fill_sum_regions(xfunc, regions, cache)
-        elif xfunc_name == "xfunc_valid_count":
-            self._fill_valid_count_regions(xfunc, regions, cache)
-
-    def _fill_xfunc_regions_column(self, xfunc, regions, cache, col):
-        """Fill one column of one xfunc's regions from the cache."""
-        xfunc_name = type(xfunc).__name__
-
-        if xfunc_name == "xfunc_mean":
-            self._fill_mean_regions_column(xfunc, regions, cache, col)
-        elif xfunc_name == "xfunc_stddev":
-            self._fill_stddev_regions_column(xfunc, regions, cache, col)
-        elif xfunc_name == "xfunc_sum":
-            self._fill_sum_regions_column(xfunc, regions, cache, col)
-        elif xfunc_name == "xfunc_valid_count":
-            self._fill_valid_count_regions_column(xfunc, regions, cache, col)
-
-    def _fill_mean_regions(self, xfunc, regions, cache):
-        """Fill mean xfunc regions."""
-        if xfunc.ignore_missing:
-            sums, valid_counts = regions
-        else:
-            sums, valid_counts, missing_counts = regions
-
-        sums[:] = cache["value_sums"]
-        valid_counts[:] = cache["valid_counts"]
-        if not xfunc.ignore_missing:
-            missing_counts[:] = cache.get("missing_counts", 0)
-
-    def _fill_mean_regions_column(self, xfunc, regions, cache, col):
-        """Fill mean xfunc regions for one column."""
-        if xfunc.ignore_missing:
-            sums, valid_counts = regions
-        else:
-            sums, valid_counts, missing_counts = regions
-
-        sums[:, col] = cache["value_sums"]
-        valid_counts[:, col] = cache["valid_counts"]
-        if not xfunc.ignore_missing:
-            missing_counts[:, col] = cache.get("missing_counts", 0)
-
-    def _fill_stddev_regions(self, xfunc, regions, cache):
-        """Fill stddev xfunc regions."""
-        if xfunc.ignore_missing:
-            stddevs, valid_counts = regions
-        else:
-            stddevs, valid_counts, missing_counts = regions
-
-        N = cache["N"]
-        varsums = cache.get("variance_sums")
-        weight_sums = cache.get("weight_sums")
-
-        if varsums is not None:
-            with numpy.errstate(divide="ignore", invalid="ignore"):
-                if self.weights is None:
-                    stddevs[:] = numpy.sqrt(varsums / (N - 1))
-                else:
-                    stddevs[:] = numpy.sqrt((varsums / weight_sums) * (N / (N - 1)))
-
-        valid_counts[:] = N
-        if not xfunc.ignore_missing:
-            missing_counts[:] = cache.get("missing_counts", 0)
-
-    def _fill_stddev_regions_column(self, xfunc, regions, cache, col):
-        """Fill stddev xfunc regions for one column."""
-        if xfunc.ignore_missing:
-            stddevs, valid_counts = regions
-        else:
-            stddevs, valid_counts, missing_counts = regions
-
-        N = cache["N"]
-        varsums = cache.get("variance_sums")
-        weight_sums = cache.get("weight_sums")
-
-        if varsums is not None:
-            with numpy.errstate(divide="ignore", invalid="ignore"):
-                if self.weights is None:
-                    stddevs[:, col] = numpy.sqrt(varsums / (N - 1))
-                else:
-                    stddevs[:, col] = numpy.sqrt((varsums / weight_sums) * (N / (N - 1)))
-
-        valid_counts[:, col] = N
-        if not xfunc.ignore_missing:
-            missing_counts[:, col] = cache.get("missing_counts", 0)
-
-    def _fill_sum_regions(self, xfunc, regions, cache):
-        """Fill sum xfunc regions."""
-        if xfunc.ignore_missing:
-            sums, valid_counts = regions
-        else:
-            sums, valid_counts, missing_counts = regions
-
-        sums[:] = cache["value_sums"]
-        valid_counts[:] = cache["N"]
-        if not xfunc.ignore_missing:
-            missing_counts[:] = cache.get("missing_counts", 0)
-
-    def _fill_sum_regions_column(self, xfunc, regions, cache, col):
-        """Fill sum xfunc regions for one column."""
-        if xfunc.ignore_missing:
-            sums, valid_counts = regions
-        else:
-            sums, valid_counts, missing_counts = regions
-
-        sums[:, col] = cache["value_sums"]
-        valid_counts[:, col] = cache["N"]
-        if not xfunc.ignore_missing:
-            missing_counts[:, col] = cache.get("missing_counts", 0)
-
-    def _fill_valid_count_regions(self, xfunc, regions, cache):
-        """Fill valid_count xfunc regions."""
-        if xfunc.ignore_missing:
-            counts, valid_counts = regions
-        else:
-            counts, valid_counts, missing_counts = regions
-
-        counts[:] = cache["valid_counts"]
-        valid_counts[:] = cache["N"]
-        if not xfunc.ignore_missing:
-            missing_counts[:] = cache.get("missing_counts", 0)
-
-    def _fill_valid_count_regions_column(self, xfunc, regions, cache, col):
-        """Fill valid_count xfunc regions for one column."""
-        if xfunc.ignore_missing:
-            counts, valid_counts = regions
-        else:
-            counts, valid_counts, missing_counts = regions
-
-        counts[:, col] = cache["valid_counts"]
-        valid_counts[:, col] = cache["N"]
-        if not xfunc.ignore_missing:
-            missing_counts[:, col] = cache.get("missing_counts", 0)
+        strategy = XFUNC_FILL_STRATEGIES.get(xfunc_name)
+        if strategy:
+            strategy.fill_regions(xfunc, regions, cache, self.weights, col)
 
     def reduce(self, cube, all_regions):
         """Reduce regions for all wrapped xfuncs.

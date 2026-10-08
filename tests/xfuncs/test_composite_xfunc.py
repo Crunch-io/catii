@@ -4,9 +4,129 @@ import numpy
 
 from catii import xcube
 from catii.composite_xfunc import CompositeXfunc, group_xfuncs
-from catii.xfuncs import xfunc_mean, xfunc_stddev
+from catii.xfuncs import xfunc_mean, xfunc_stddev, xfunc_sum, xfunc_valid_count
 
 from .. import arr_eq
+
+
+class TestCompositeXfuncAllXfuncTypes:
+    """Test that all four xfunc types work correctly with CompositeXfunc."""
+
+    def test_composite_with_all_four_xfunc_types(self):
+        """CompositeXfunc should handle mean, stddev, sum, and valid_count together."""
+        arr1 = [1, 0, 1, 0, 0, 0, 0, 1]
+        factvar = numpy.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
+
+        cube = xcube([arr1])
+
+        fmean = xfunc_mean(factvar)
+        fstddev = xfunc_stddev(factvar)
+        fsum = xfunc_sum(factvar)
+        fvalid_count = xfunc_valid_count(factvar)
+
+        means, stddevs, sums, valid_counts = cube.calculate(
+            [fmean, fstddev, fsum, fvalid_count]
+        )
+
+        # For arr1=[1,0,1,0,0,0,0,1]: category 0 has rows [1,3,4,5,6], category 1 has rows [0,2,7]
+        # factvar=[0,1,2,3,4,5,6,7]
+        # Category 0: values [1,3,4,5,6] -> sum=19, count=5, mean=3.8
+        # Category 1: values [0,2,7] -> sum=9, count=3, mean=3.0
+        expected_sums = [19.0, 9.0]
+        expected_valid_counts = [5.0, 3.0]
+        expected_means = [3.8, 3.0]
+        expected_stddevs = [numpy.std([1, 3, 4, 5, 6], ddof=1), numpy.std([0, 2, 7], ddof=1)]
+
+        assert arr_eq(sums, expected_sums)
+        assert arr_eq(valid_counts, expected_valid_counts)
+        assert arr_eq(means, expected_means)
+        assert arr_eq(stddevs, expected_stddevs)
+
+    def test_composite_sum_alone(self):
+        """CompositeXfunc should handle sum correctly when it's the only xfunc."""
+        arr1 = [1, 0, 1, 0, 0]
+        factvar = numpy.array([10.0, 20.0, 30.0, 40.0, 50.0])
+
+        cube = xcube([arr1])
+        fsum = xfunc_sum(factvar)
+
+        (sums,) = cube.calculate([fsum])
+
+        # Category 0: rows [1,3,4] -> values [20,40,50] -> sum=110
+        # Category 1: rows [0,2] -> values [10,30] -> sum=40
+        expected_sums = [110.0, 40.0]
+        assert arr_eq(sums, expected_sums)
+
+    def test_composite_valid_count_alone(self):
+        """CompositeXfunc should handle valid_count correctly when it's the only xfunc."""
+        arr1 = [1, 0, 1, 0, 0]
+        factvar = numpy.array([10.0, numpy.nan, 30.0, 40.0, 50.0])
+
+        cube = xcube([arr1])
+        fvalid_count = xfunc_valid_count(factvar)
+
+        (valid_counts,) = cube.calculate([fvalid_count])
+
+        # Category 0: rows [1,3,4] -> values [nan,40,50] -> has missing, propagates NaN
+        # Category 1: rows [0,2] -> values [10,30] -> valid_count=2
+        # With ignore_missing=False (default), NaN propagates
+        expected_valid_counts = [float("nan"), 2.0]
+        assert arr_eq(valid_counts, expected_valid_counts)
+
+    def test_composite_valid_count_ignore_missing(self):
+        """CompositeXfunc valid_count with ignore_missing=True."""
+        arr1 = [1, 0, 1, 0, 0]
+        factvar = numpy.array([10.0, numpy.nan, 30.0, 40.0, 50.0])
+
+        cube = xcube([arr1])
+        fvalid_count = xfunc_valid_count(factvar, ignore_missing=True)
+
+        (valid_counts,) = cube.calculate([fvalid_count])
+
+        # Category 0: rows [1,3,4] -> values [nan,40,50] -> valid_count=2 (nan ignored)
+        # Category 1: rows [0,2] -> values [10,30] -> valid_count=2
+        expected_valid_counts = [2.0, 2.0]
+        assert arr_eq(valid_counts, expected_valid_counts)
+
+    def test_composite_sum_and_valid_count(self):
+        """CompositeXfunc should handle sum and valid_count together."""
+        arr1 = [1, 0, 1, 0, 0]
+        factvar = numpy.array([10.0, numpy.nan, 30.0, 40.0, 50.0])
+
+        cube = xcube([arr1])
+        fsum = xfunc_sum(factvar)
+        fvalid_count = xfunc_valid_count(factvar)
+
+        sums, valid_counts = cube.calculate([fsum, fvalid_count])
+
+        # Category 0: rows [1,3,4] -> values [nan,40,50] -> has missing, propagates NaN
+        # Category 1: rows [0,2] -> values [10,30] -> sum=40, valid_count=2
+        # With ignore_missing=False (default), NaN propagates
+        expected_sums = [float("nan"), 40.0]
+        expected_valid_counts = [float("nan"), 2.0]
+
+        assert arr_eq(sums, expected_sums)
+        assert arr_eq(valid_counts, expected_valid_counts)
+
+    def test_composite_2d_with_sum_and_valid_count(self):
+        """CompositeXfunc should handle 2D data with sum and valid_count."""
+        arr1 = [1, 0, 1, 0]
+        factvar = numpy.array([[1.0, 2.0], [3.0, numpy.nan], [5.0, 6.0], [7.0, 8.0]])
+
+        cube = xcube([arr1])
+        fsum = xfunc_sum(factvar)
+        fvalid_count = xfunc_valid_count(factvar)
+
+        sums, valid_counts = cube.calculate([fsum, fvalid_count])
+
+        # Category 0: rows [1,3] -> col0: [3,7]=10, col1: [nan,8] -> has nan, propagates
+        # Category 1: rows [0,2] -> col0: [1,5]=6, col1: [2,6]=8
+        # With ignore_missing=False (default), NaN propagates
+        expected_sums = [[10.0, float("nan")], [6.0, 8.0]]
+        expected_valid_counts = [[2.0, float("nan")], [2.0, 2.0]]
+
+        assert arr_eq(sums, expected_sums)
+        assert arr_eq(valid_counts, expected_valid_counts)
 
 
 class TestCompositeXfuncGrouping:
