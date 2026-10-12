@@ -1490,3 +1490,474 @@ class xfunc_covariance(xfunc):
             return covs, ~missings
         else:
             return covs
+
+
+# Default quantile probabilities (fivenum)
+DEFAULT_QUANTILES = [0.0, 0.25, 0.5, 0.75, 1.0]
+
+
+class NumericSummaryResult(dict):
+    """A dict-like container for numeric summary results.
+
+    Provides attribute access to results for convenience:
+        result["mean"] and result.mean are equivalent.
+    """
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(f"No statistic named '{name}'")
+
+
+class xfunc_numeric_summary(xfunc):
+    """Calculate multiple numeric statistics in a single pass over the data.
+
+    This xfunc computes any combination of:
+    - mean: weighted arithmetic mean
+    - stddev: weighted standard deviation (ddof=1)
+    - valid_count: unweighted count of non-missing values
+    - sum: weighted sum
+    - quantiles: weighted quantiles at specified probabilities
+
+    The goal is to reduce both the number of cube calls and the number of
+    calculations by sharing intermediate computations.
+
+    Parameters
+    ----------
+    arr : array or (values, validity) tuple
+        NumPy array of numeric values, or a tuple of (values, validity) arrays.
+        Missing values are represented by NaN or validity=False.
+
+    weights : array or (weights, validity) tuple, optional
+        NumPy array of weight values.
+
+    ignore_missing : bool, default False
+        If False, any missing value in a bin causes that bin's result to be
+        missing. If True, missing values are skipped.
+
+    return_missing_as : scalar or tuple, default NaN
+        If NaN, missing results are returned as NaN. If a tuple like (0, False),
+        results are returned as (values, validity) tuples.
+
+    include : dict, optional
+        Specifies which statistics to compute. Keys are statistic names,
+        values are True or (for quantiles) a list of probabilities.
+        Default: all statistics with quantiles=[0, 0.25, 0.5, 0.75, 1.0]
+
+        Examples:
+            include={"mean": True, "stddev": True}
+            include={"quantiles": [0.1, 0.5, 0.9]}
+            include={"mean": True, "quantiles": [0.5]}
+
+    Returns
+    -------
+    NumericSummaryResult
+        A dict-like object with requested statistics as keys.
+        For dimensioned cubes, values are NumPy arrays shaped like the cube.
+        The "quantiles" value is itself a dict mapping probability -> array.
+    """
+
+    def __init__(
+        self,
+        arr,
+        weights=None,
+        ignore_missing=False,
+        return_missing_as=NaN,
+        include=None,
+    ):
+        # Parse include configuration
+        if include is None:
+            include = {
+                "mean": True,
+                "stddev": True,
+                "valid_count": True,
+                "sum": True,
+                "quantiles": DEFAULT_QUANTILES,
+            }
+
+        if not include:
+            raise ValueError("include must specify at least one statistic")
+
+        self.include_mean = include.get("mean", False)
+        self.include_stddev = include.get("stddev", False)
+        self.include_valid_count = include.get("valid_count", False)
+        self.include_sum = include.get("sum", False)
+        self.include_quantiles = include.get("quantiles", False)
+
+        if self.include_quantiles:
+            if self.include_quantiles is True:
+                self.quantile_probs = numpy.array(DEFAULT_QUANTILES, dtype=float)
+            else:
+                self.quantile_probs = numpy.array(self.include_quantiles, dtype=float)
+        else:
+            self.quantile_probs = None
+
+        # Process input array
+        arr, validity = as_separate_validity(arr)
+        self.shape = arr.shape[1:]
+        self.size = numpy.prod(self.shape, 0)
+
+        # Process weights
+        if weights is not None:
+            weights, weights_validity = as_separate_validity(weights)
+            validity = (validity.T & weights_validity).T
+            # Set negative weights to 0, like SAS EXCLNPWGT option
+            with numpy.errstate(invalid="ignore"):
+                neg_weights = weights < 0
+            if neg_weights.any():
+                weights = weights.copy()
+                weights[neg_weights] = 0
+
+        self.weights = weights
+        self.validity = validity
+        self.ignore_missing = ignore_missing
+        self.return_missing_as = return_missing_as
+
+        if isinstance(self.return_missing_as, tuple):
+            self.null = self.return_missing_as[0]
+        else:
+            self.null = self.return_missing_as
+
+        # Prepare data arrays for different computations
+        # For quantiles, keep original values with NaN for missing
+        self.arr = arr.astype(float).copy()
+        self.arr[~validity] = NaN
+
+        # For mean/sum, prepare weighted summables
+        if self.include_mean or self.include_sum or self.include_stddev:
+            summables = arr.astype(float).copy()
+            if weights is not None:
+                self.wsummables = (summables.T * weights).T
+            else:
+                self.wsummables = summables
+            self.wsummables[~validity] = 0
+
+            # For valid_count computation (weighted counts for mean denominator)
+            if weights is not None:
+                self.countables = (validity.astype(float).T * weights).T
+            else:
+                self.countables = validity.astype(float)
+            self.countables[~validity] = 0
+
+            # Unweighted summables for stddev variance calculation
+            self.summables = arr.astype(float).copy()
+            self.summables[~validity] = 0
+
+    def get_initial_regions(self, cube):
+        """Return empty NumPy arrays to fill."""
+        shape = cube.shape + self.shape
+        if not shape:
+            shape = (1,)
+
+        regions = {}
+
+        if self.include_mean:
+            regions["mean_sums"] = numpy.zeros(shape, dtype=float)
+            regions["mean_counts"] = numpy.zeros(shape, dtype=float)
+
+        if self.include_stddev:
+            regions["stddev_values"] = numpy.full(shape, NaN, dtype=float)
+
+        if self.include_valid_count:
+            regions["valid_count"] = numpy.zeros(shape, dtype=int)
+
+        if self.include_sum:
+            regions["sum"] = numpy.zeros(shape, dtype=float)
+
+        if self.include_quantiles:
+            regions["quantiles"] = {
+                p: numpy.full(shape, NaN, dtype=float) for p in self.quantile_probs
+            }
+
+        # Track missing for output
+        if not self.ignore_missing:
+            regions["missing_counts"] = numpy.zeros(shape, dtype=int)
+
+        # Always track N for stddev calculation
+        regions["N"] = numpy.zeros(shape, dtype=int)
+
+        return regions
+
+    def calculate(self, cube):
+        """Return a NumericSummaryResult with requested statistics.
+
+        This overrides the base calculate to properly handle the regions dict
+        format and compute coordinates from the cube.
+        """
+        from functools import reduce
+        import operator
+
+        regions = self.get_initial_regions(cube)
+
+        # Compute coordinates from cube dimensions (same logic as xcube.calculate)
+        strided_dims = cube.strided_dims()
+        coordinates = reduce(operator.add, strided_dims) if strided_dims else None
+
+        self.fill(coordinates, regions)
+        return self.reduce(cube, regions)
+
+    def fill(self, coordinates, regions):
+        """Fill regions with statistics computed in a single pass."""
+        if coordinates is None:
+            self._fill_no_coordinates(regions)
+        else:
+            self._fill_with_coordinates(coordinates, regions)
+
+    def _fill_no_coordinates(self, regions):
+        """Fill for scalar cube (no dimensions)."""
+        N = numpy.count_nonzero(self.validity, axis=0)
+        regions["N"][:] = N
+
+        if not self.ignore_missing:
+            regions["missing_counts"][:] = numpy.count_nonzero(~self.validity, axis=0)
+
+        # Mean and sum share weighted sums
+        if self.include_mean or self.include_sum:
+            value_sums = numpy.nansum(self.wsummables, axis=0)
+
+        if self.include_mean:
+            valid_counts = numpy.sum(self.countables, axis=0)
+            regions["mean_sums"][:] = value_sums
+            regions["mean_counts"][:] = valid_counts
+
+        if self.include_sum:
+            regions["sum"][:] = value_sums
+
+        if self.include_valid_count:
+            regions["valid_count"][:] = N
+
+        if self.include_stddev:
+            # Compute stddev using Welford-like approach
+            valid_counts = numpy.sum(self.countables, axis=0)
+            value_sums = numpy.nansum(self.wsummables, axis=0)
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                means = value_sums / valid_counts
+
+            squared_variances = (self.summables - means) ** 2
+            if self.weights is not None:
+                squared_variances = (squared_variances.T * self.weights).T
+            squared_variances[~self.validity] = 0
+            varsums = numpy.sum(squared_variances, axis=0)
+
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                if self.weights is None:
+                    regions["stddev_values"][:] = numpy.sqrt(varsums / (N - 1))
+                else:
+                    weight_sums = numpy.sum(
+                        numpy.where(self.validity, self.weights, 0), axis=0
+                    )
+                    regions["stddev_values"][:] = numpy.sqrt(
+                        (varsums / weight_sums) * (N / (N - 1))
+                    )
+
+        if self.include_quantiles:
+            for p in self.quantile_probs:
+                if self.weights is None:
+                    if len(self.arr) and not numpy.all(numpy.isnan(self.arr)):
+                        if self.ignore_missing:
+                            regions["quantiles"][p][:] = numpy.nanquantile(
+                                self.arr, p, axis=0
+                            )
+                        else:
+                            regions["quantiles"][p][:] = numpy.quantile(
+                                self.arr, p, axis=0
+                            )
+                else:
+                    regions["quantiles"][p][:] = self._weighted_quantile(
+                        self.arr, p, self.weights
+                    )
+
+    def _fill_with_coordinates(self, coordinates, regions):
+        """Fill for cube with dimensions."""
+        # Get size from any region array
+        size = regions["N"].size
+
+        # N is the unweighted count of valid (non-missing) values
+        # This is what xfunc_valid_count computes
+        N = numpy.bincount(
+            coordinates, weights=self.validity.astype(float), minlength=size
+        )[:size].astype(int)
+        regions["N"].flat[:] = N
+
+        if not self.ignore_missing:
+            missing = numpy.bincount(
+                coordinates, weights=(~self.validity).astype(float), minlength=size
+            )[:size].astype(int)
+            regions["missing_counts"].flat[:] = missing
+
+        if self.include_mean or self.include_sum or self.include_stddev:
+            value_sums = numpy.bincount(
+                coordinates, weights=self.wsummables, minlength=size
+            )[:size]
+
+        if self.include_mean:
+            valid_counts = numpy.bincount(
+                coordinates, weights=self.countables, minlength=size
+            )[:size]
+            regions["mean_sums"].flat[:] = value_sums
+            regions["mean_counts"].flat[:] = valid_counts
+
+        if self.include_sum:
+            regions["sum"].flat[:] = value_sums
+
+        if self.include_valid_count:
+            # valid_count is the unweighted count of non-missing values
+            regions["valid_count"].flat[:] = N
+
+        if self.include_stddev:
+            valid_counts = numpy.bincount(
+                coordinates, weights=self.countables, minlength=size
+            )[:size]
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                means = value_sums / valid_counts
+
+            # Compute variance sums
+            squared_variances = (self.summables - means[coordinates]) ** 2
+            if self.weights is not None:
+                squared_variances = squared_variances * self.weights
+            squared_variances[~self.validity] = 0
+            varsums = numpy.bincount(
+                coordinates, weights=squared_variances, minlength=size
+            )[:size]
+
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                if self.weights is None:
+                    # Use N (valid count) not total count
+                    regions["stddev_values"].flat[:] = numpy.sqrt(varsums / (N - 1))
+                else:
+                    weight_sums = numpy.bincount(
+                        coordinates,
+                        weights=numpy.where(self.validity, self.weights, 0),
+                        minlength=size,
+                    )[:size]
+                    # Use N (valid count) not total count
+                    regions["stddev_values"].flat[:] = numpy.sqrt(
+                        (varsums / weight_sums) * (N / (N - 1))
+                    )
+
+        if self.include_quantiles:
+            # Quantiles require per-bin iteration (sorting-based)
+            for i, rowmask in self.bins(coordinates, size):
+                seg = self.arr[rowmask]
+                if len(seg) == 0 or numpy.all(numpy.isnan(seg)):
+                    continue
+
+                if self.weights is None:
+                    for p in self.quantile_probs:
+                        if self.ignore_missing:
+                            regions["quantiles"][p].flat[i] = numpy.nanquantile(
+                                seg, p, axis=0
+                            )
+                        else:
+                            regions["quantiles"][p].flat[i] = numpy.quantile(
+                                seg, p, axis=0
+                            )
+                else:
+                    w = self.weights[rowmask]
+                    for p in self.quantile_probs:
+                        regions["quantiles"][p].flat[i] = self._weighted_quantile(
+                            seg, p, w
+                        )
+
+    def _weighted_quantile(self, arr, probability, weights):
+        """Compute weighted quantile for 1D array."""
+
+        def weighted_quantile_1d(a):
+            w = weights
+
+            ind = a.argsort()
+            a = a[ind]
+            w = w[ind]
+
+            if self.ignore_missing:
+                missing = numpy.isnan(a) | numpy.isnan(w)
+                if numpy.any(missing):
+                    valid = ~missing
+                    a = a[valid]
+                    w = w[valid]
+
+            N = len(w)
+            if N == 0:
+                return NaN
+
+            cs = w.cumsum(axis=0)
+            prob = probability * cs[-1]
+            right = numpy.digitize(prob, cs)
+            left = (right - 1).clip(min=0)
+            xdiff = numpy.diff(a, append=[0], axis=0)
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                frac = (prob - cs[left]).clip(min=0) / w[right.clip(max=len(w) - 1)]
+                return a[left] + frac * xdiff[left]
+
+        if arr.ndim == 1:
+            return weighted_quantile_1d(arr)
+        return numpy.apply_along_axis(weighted_quantile_1d, 0, arr)
+
+    def reduce(self, cube, regions):
+        """Reduce regions to final output."""
+        result = NumericSummaryResult()
+
+        N = regions["N"]
+        if not self.ignore_missing:
+            missing_counts = regions["missing_counts"]
+            has_missing = missing_counts != 0
+        else:
+            has_missing = numpy.zeros_like(N, dtype=bool)
+
+        no_data = N == 0
+
+        if self.include_mean:
+            with numpy.errstate(divide="ignore", invalid="ignore"):
+                mean = regions["mean_sums"] / regions["mean_counts"]
+            output_is_missing = no_data | has_missing
+            mean = self.adjust_zeros(mean, self.null, condition=output_is_missing)
+            if isinstance(self.return_missing_as, tuple):
+                result["mean"] = (mean, ~output_is_missing)
+            else:
+                result["mean"] = mean
+
+        if self.include_stddev:
+            stddev = regions["stddev_values"]
+            # stddev needs at least 2 values
+            output_is_missing = (N < 2) | has_missing
+            stddev = self.adjust_zeros(stddev, self.null, condition=output_is_missing)
+            if isinstance(self.return_missing_as, tuple):
+                result["stddev"] = (stddev, ~output_is_missing)
+            else:
+                result["stddev"] = stddev
+
+        if self.include_valid_count:
+            valid_count = regions["valid_count"]
+            # valid_count is always returned, even for empty bins
+            if isinstance(self.return_missing_as, tuple):
+                result["valid_count"] = (valid_count, ~no_data)
+            else:
+                result["valid_count"] = valid_count
+
+        if self.include_sum:
+            sum_values = regions["sum"]
+            output_is_missing = no_data | has_missing
+            sum_values = self.adjust_zeros(
+                sum_values, self.null, condition=output_is_missing
+            )
+            if isinstance(self.return_missing_as, tuple):
+                result["sum"] = (sum_values, ~output_is_missing)
+            else:
+                result["sum"] = sum_values
+
+        if self.include_quantiles:
+            quantiles_result = {}
+            output_is_missing = no_data | has_missing
+            for p in self.quantile_probs:
+                q = regions["quantiles"][p]
+                if isinstance(self.return_missing_as, tuple):
+                    missings = numpy.isnan(q) | output_is_missing
+                    q = q.copy()
+                    q[missings] = self.null
+                    quantiles_result[p] = (q, ~missings)
+                else:
+                    quantiles_result[p] = q
+            result["quantiles"] = quantiles_result
+
+        return result
