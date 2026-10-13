@@ -50,6 +50,8 @@ replace NaN values in the `values` array with 0 in that case. If you prefer
 `sum([])` to return 0, for example, without a second "validity" array,
 pass `return_missing_as=0`.
 """
+import functools
+import operator
 import warnings
 
 import numpy
@@ -1492,22 +1494,8 @@ class xfunc_covariance(xfunc):
             return covs
 
 
-# Default quantile probabilities (fivenum)
+# Default quantile probabilities
 DEFAULT_QUANTILES = [0.0, 0.25, 0.5, 0.75, 1.0]
-
-
-class NumericSummaryResult(dict):
-    """A dict-like container for numeric summary results.
-
-    Provides attribute access to results for convenience:
-        result["mean"] and result.mean are equivalent.
-    """
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(f"No statistic named '{name}'")
 
 
 class xfunc_numeric_summary(xfunc):
@@ -1552,8 +1540,8 @@ class xfunc_numeric_summary(xfunc):
 
     Returns
     -------
-    NumericSummaryResult
-        A dict-like object with requested statistics as keys.
+    dict
+        A dict with requested statistics as keys.
         For dimensioned cubes, values are NumPy arrays shaped like the cube.
         The "quantiles" value is itself a dict mapping probability -> array.
     """
@@ -1652,18 +1640,18 @@ class xfunc_numeric_summary(xfunc):
 
         regions = {}
 
-        if self.include_mean:
-            regions["mean_sums"] = numpy.zeros(shape, dtype=float)
-            regions["mean_counts"] = numpy.zeros(shape, dtype=float)
+        # valid_count is needed for mean denominator and stddev, so always allocate
+        regions["valid_count"] = numpy.zeros(shape, dtype=int)
+
+        # For weighted mean, we need weighted counts separately
+        if self.include_mean and self.weights is not None:
+            regions["weighted_counts"] = numpy.zeros(shape, dtype=float)
+
+        if self.include_mean or self.include_sum:
+            regions["sums"] = numpy.zeros(shape, dtype=float)
 
         if self.include_stddev:
             regions["stddev_values"] = numpy.full(shape, NaN, dtype=float)
-
-        if self.include_valid_count:
-            regions["valid_count"] = numpy.zeros(shape, dtype=int)
-
-        if self.include_sum:
-            regions["sum"] = numpy.zeros(shape, dtype=float)
 
         if self.include_quantiles:
             regions["quantiles"] = {
@@ -1674,25 +1662,21 @@ class xfunc_numeric_summary(xfunc):
         if not self.ignore_missing:
             regions["missing_counts"] = numpy.zeros(shape, dtype=int)
 
-        # Always track N for stddev calculation
-        regions["N"] = numpy.zeros(shape, dtype=int)
-
         return regions
 
     def calculate(self, cube):
-        """Return a NumericSummaryResult with requested statistics.
+        """Return a dict with requested statistics.
 
         This overrides the base calculate to properly handle the regions dict
         format and compute coordinates from the cube.
         """
-        from functools import reduce
-        import operator
-
         regions = self.get_initial_regions(cube)
 
         # Compute coordinates from cube dimensions (same logic as xcube.calculate)
         strided_dims = cube.strided_dims()
-        coordinates = reduce(operator.add, strided_dims) if strided_dims else None
+        coordinates = (
+            functools.reduce(operator.add, strided_dims) if strided_dims else None
+        )
 
         self.fill(coordinates, regions)
         return self.reduce(cube, regions)
@@ -1706,8 +1690,8 @@ class xfunc_numeric_summary(xfunc):
 
     def _fill_no_coordinates(self, regions):
         """Fill for scalar cube (no dimensions)."""
-        N = numpy.count_nonzero(self.validity, axis=0)
-        regions["N"][:] = N
+        valid_count = numpy.count_nonzero(self.validity, axis=0)
+        regions["valid_count"][:] = valid_count
 
         if not self.ignore_missing:
             regions["missing_counts"][:] = numpy.count_nonzero(~self.validity, axis=0)
@@ -1715,24 +1699,22 @@ class xfunc_numeric_summary(xfunc):
         # Mean and sum share weighted sums
         if self.include_mean or self.include_sum:
             value_sums = numpy.nansum(self.wsummables, axis=0)
+            regions["sums"][:] = value_sums
 
-        if self.include_mean:
-            valid_counts = numpy.sum(self.countables, axis=0)
-            regions["mean_sums"][:] = value_sums
-            regions["mean_counts"][:] = valid_counts
-
-        if self.include_sum:
-            regions["sum"][:] = value_sums
-
-        if self.include_valid_count:
-            regions["valid_count"][:] = N
+        if self.include_mean and self.weights is not None:
+            regions["weighted_counts"][:] = numpy.sum(self.countables, axis=0)
 
         if self.include_stddev:
-            # Compute stddev using Welford-like approach
-            valid_counts = numpy.sum(self.countables, axis=0)
-            value_sums = numpy.nansum(self.wsummables, axis=0)
-            with numpy.errstate(divide="ignore", invalid="ignore"):
-                means = value_sums / valid_counts
+            # Compute stddev
+            if self.weights is not None:
+                weighted_counts = numpy.sum(self.countables, axis=0)
+                value_sums = numpy.nansum(self.wsummables, axis=0)
+                with numpy.errstate(divide="ignore", invalid="ignore"):
+                    means = value_sums / weighted_counts
+            else:
+                value_sums = numpy.nansum(self.wsummables, axis=0)
+                with numpy.errstate(divide="ignore", invalid="ignore"):
+                    means = value_sums / valid_count
 
             squared_variances = (self.summables - means) ** 2
             if self.weights is not None:
@@ -1742,18 +1724,19 @@ class xfunc_numeric_summary(xfunc):
 
             with numpy.errstate(divide="ignore", invalid="ignore"):
                 if self.weights is None:
-                    regions["stddev_values"][:] = numpy.sqrt(varsums / (N - 1))
+                    regions["stddev_values"][:] = numpy.sqrt(varsums / (valid_count - 1))
                 else:
                     weight_sums = numpy.sum(
                         numpy.where(self.validity, self.weights, 0), axis=0
                     )
                     regions["stddev_values"][:] = numpy.sqrt(
-                        (varsums / weight_sums) * (N / (N - 1))
+                        (varsums / weight_sums) * (valid_count / (valid_count - 1))
                     )
 
         if self.include_quantiles:
-            for p in self.quantile_probs:
-                if self.weights is None:
+            if self.weights is None:
+                # Unweighted: numpy handles multiple quantiles efficiently
+                for p in self.quantile_probs:
                     if len(self.arr) and not numpy.all(numpy.isnan(self.arr)):
                         if self.ignore_missing:
                             regions["quantiles"][p][:] = numpy.nanquantile(
@@ -1763,22 +1746,25 @@ class xfunc_numeric_summary(xfunc):
                             regions["quantiles"][p][:] = numpy.quantile(
                                 self.arr, p, axis=0
                             )
-                else:
-                    regions["quantiles"][p][:] = self._weighted_quantile(
-                        self.arr, p, self.weights
-                    )
+            else:
+                # Weighted: sort once and compute all quantiles
+                results = self._weighted_quantiles_all(
+                    self.arr, self.quantile_probs, self.weights
+                )
+                for p, val in zip(self.quantile_probs, results):
+                    regions["quantiles"][p][:] = val
+
 
     def _fill_with_coordinates(self, coordinates, regions):
         """Fill for cube with dimensions."""
-        # Get size from any region array
-        size = regions["N"].size
+        # Get size from valid_count region
+        size = regions["valid_count"].size
 
-        # N is the unweighted count of valid (non-missing) values
-        # This is what xfunc_valid_count computes
-        N = numpy.bincount(
+        # valid_count is the unweighted count of non-missing values
+        valid_count = numpy.bincount(
             coordinates, weights=self.validity.astype(float), minlength=size
         )[:size].astype(int)
-        regions["N"].flat[:] = N
+        regions["valid_count"].flat[:] = valid_count
 
         if not self.ignore_missing:
             missing = numpy.bincount(
@@ -1790,27 +1776,25 @@ class xfunc_numeric_summary(xfunc):
             value_sums = numpy.bincount(
                 coordinates, weights=self.wsummables, minlength=size
             )[:size]
+            if self.include_mean or self.include_sum:
+                regions["sums"].flat[:] = value_sums
 
-        if self.include_mean:
-            valid_counts = numpy.bincount(
+        if self.include_mean and self.weights is not None:
+            weighted_counts = numpy.bincount(
                 coordinates, weights=self.countables, minlength=size
             )[:size]
-            regions["mean_sums"].flat[:] = value_sums
-            regions["mean_counts"].flat[:] = valid_counts
-
-        if self.include_sum:
-            regions["sum"].flat[:] = value_sums
-
-        if self.include_valid_count:
-            # valid_count is the unweighted count of non-missing values
-            regions["valid_count"].flat[:] = N
+            regions["weighted_counts"].flat[:] = weighted_counts
 
         if self.include_stddev:
-            valid_counts = numpy.bincount(
-                coordinates, weights=self.countables, minlength=size
-            )[:size]
-            with numpy.errstate(divide="ignore", invalid="ignore"):
-                means = value_sums / valid_counts
+            if self.weights is not None:
+                weighted_counts = numpy.bincount(
+                    coordinates, weights=self.countables, minlength=size
+                )[:size]
+                with numpy.errstate(divide="ignore", invalid="ignore"):
+                    means = value_sums / weighted_counts
+            else:
+                with numpy.errstate(divide="ignore", invalid="ignore"):
+                    means = value_sums / valid_count
 
             # Compute variance sums
             squared_variances = (self.summables - means[coordinates]) ** 2
@@ -1823,17 +1807,17 @@ class xfunc_numeric_summary(xfunc):
 
             with numpy.errstate(divide="ignore", invalid="ignore"):
                 if self.weights is None:
-                    # Use N (valid count) not total count
-                    regions["stddev_values"].flat[:] = numpy.sqrt(varsums / (N - 1))
+                    regions["stddev_values"].flat[:] = numpy.sqrt(
+                        varsums / (valid_count - 1)
+                    )
                 else:
                     weight_sums = numpy.bincount(
                         coordinates,
                         weights=numpy.where(self.validity, self.weights, 0),
                         minlength=size,
                     )[:size]
-                    # Use N (valid count) not total count
                     regions["stddev_values"].flat[:] = numpy.sqrt(
-                        (varsums / weight_sums) * (N / (N - 1))
+                        (varsums / weight_sums) * (valid_count / (valid_count - 1))
                     )
 
         if self.include_quantiles:
@@ -1859,6 +1843,65 @@ class xfunc_numeric_summary(xfunc):
                         regions["quantiles"][p].flat[i] = self._weighted_quantile(
                             seg, p, w
                         )
+
+    def _weighted_quantiles_all(self, arr, probabilities, weights):
+        """Compute multiple weighted quantiles with a single sort.
+
+        This is much faster than calling _weighted_quantile for each probability
+        because sorting is O(n log n) and dominates the computation.
+        """
+
+        def weighted_quantiles_1d(a):
+            w = weights
+
+            # Sort once
+            ind = a.argsort()
+            a = a[ind]
+            w = w[ind]
+
+            if self.ignore_missing:
+                missing = numpy.isnan(a) | numpy.isnan(w)
+                if numpy.any(missing):
+                    valid = ~missing
+                    a = a[valid]
+                    w = w[valid]
+
+            N = len(w)
+            if N == 0:
+                return [NaN] * len(probabilities)
+
+            cs = w.cumsum(axis=0)
+            xdiff = numpy.diff(a, append=[0], axis=0)
+
+            # Compute all quantiles from the same sorted data
+            results = []
+            for prob_val in probabilities:
+                prob = prob_val * cs[-1]
+                right = numpy.digitize(prob, cs)
+                left = (right - 1).clip(min=0)
+                with numpy.errstate(divide="ignore", invalid="ignore"):
+                    frac = (prob - cs[left]).clip(min=0) / w[right.clip(max=len(w) - 1)]
+                    results.append(a[left] + frac * xdiff[left])
+            return results
+
+        if arr.ndim == 1:
+            return weighted_quantiles_1d(arr)
+
+        # For 2D arrays, apply along axis 0
+        n_probs = len(probabilities)
+        result_shape = arr.shape[1:] if arr.ndim > 1 else (1,)
+        results = [numpy.full(result_shape, NaN, dtype=float) for _ in range(n_probs)]
+
+        for col_idx in range(arr.shape[1] if arr.ndim > 1 else 1):
+            col = arr[:, col_idx] if arr.ndim > 1 else arr
+            col_results = weighted_quantiles_1d(col)
+            for i, val in enumerate(col_results):
+                if arr.ndim > 1:
+                    results[i][col_idx] = val
+                else:
+                    results[i][:] = val
+
+        return results
 
     def _weighted_quantile(self, arr, probability, weights):
         """Compute weighted quantile for 1D array."""
@@ -1896,20 +1939,24 @@ class xfunc_numeric_summary(xfunc):
 
     def reduce(self, cube, regions):
         """Reduce regions to final output."""
-        result = NumericSummaryResult()
+        result = {}
 
-        N = regions["N"]
+        valid_count = regions["valid_count"]
         if not self.ignore_missing:
             missing_counts = regions["missing_counts"]
             has_missing = missing_counts != 0
         else:
-            has_missing = numpy.zeros_like(N, dtype=bool)
+            has_missing = numpy.zeros_like(valid_count, dtype=bool)
 
-        no_data = N == 0
+        no_data = valid_count == 0
 
         if self.include_mean:
+            if self.weights is not None:
+                denominator = regions["weighted_counts"]
+            else:
+                denominator = valid_count
             with numpy.errstate(divide="ignore", invalid="ignore"):
-                mean = regions["mean_sums"] / regions["mean_counts"]
+                mean = regions["sums"] / denominator
             output_is_missing = no_data | has_missing
             mean = self.adjust_zeros(mean, self.null, condition=output_is_missing)
             if isinstance(self.return_missing_as, tuple):
@@ -1920,7 +1967,7 @@ class xfunc_numeric_summary(xfunc):
         if self.include_stddev:
             stddev = regions["stddev_values"]
             # stddev needs at least 2 values
-            output_is_missing = (N < 2) | has_missing
+            output_is_missing = (valid_count < 2) | has_missing
             stddev = self.adjust_zeros(stddev, self.null, condition=output_is_missing)
             if isinstance(self.return_missing_as, tuple):
                 result["stddev"] = (stddev, ~output_is_missing)
@@ -1928,7 +1975,6 @@ class xfunc_numeric_summary(xfunc):
                 result["stddev"] = stddev
 
         if self.include_valid_count:
-            valid_count = regions["valid_count"]
             # valid_count is always returned, even for empty bins
             if isinstance(self.return_missing_as, tuple):
                 result["valid_count"] = (valid_count, ~no_data)
@@ -1936,7 +1982,7 @@ class xfunc_numeric_summary(xfunc):
                 result["valid_count"] = valid_count
 
         if self.include_sum:
-            sum_values = regions["sum"]
+            sum_values = regions["sums"]
             output_is_missing = no_data | has_missing
             sum_values = self.adjust_zeros(
                 sum_values, self.null, condition=output_is_missing

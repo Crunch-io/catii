@@ -48,7 +48,7 @@ class TestNumericSummaryBasicInterface:
         # stddev of [1,2,3,4,5] with ddof=1 is sqrt(2.5) ≈ 1.5811
         assert result["stddev"] == pytest.approx(numpy.std(arr, ddof=1))
 
-        # Default quantiles should be fivenum: 0, 0.25, 0.5, 0.75, 1.0
+        # Default quantiles should be: 0, 0.25, 0.5, 0.75, 1.0
         assert len(result["quantiles"]) == 5
         assert result["quantiles"][0.0] == pytest.approx(1.0)  # min
         assert result["quantiles"][0.25] == pytest.approx(2.0)  # Q1
