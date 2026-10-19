@@ -15,12 +15,10 @@ jobs:
       matrix:
         python-version: ["3.11", "3.14"]
         # setup.py used to have numpy>=1.15.2 but with a cap of <2. The cap has
-        # been removed to allow packages that reference catii (such as zz9d) to
-        # decide which numpy to use (1 or 2). An unpinned install of catii from
+        # been removed to allow packages that reference catii to
+        # decide which numpy to use (1 or 2). An unpinned installation of catii from
         # both pythons (3.11 and 3.14) will result in the installation of numpy
-        # 2, because that's what public PyPI will resolve to. In the context of
-        # zz9d workflows it will still be numpy 1 - because that's what's (still)
-        # pinned from its (zz9d's) dependencies.
+        # 2, because that's what public PyPI will resolve to.
         numpy: ["1", "2"]
         exclude:
           # numpy only added Python 3.14 support in its 2.x line; no numpy 1.x
