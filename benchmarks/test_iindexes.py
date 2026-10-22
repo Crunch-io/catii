@@ -14,13 +14,13 @@ class Test_iindex_reindexed(UnitBenchmark):
     def test_iindex_reindexed_merge(self):
         C = self.categorical()
         mapping = {k: k % 4 for k in range(self.params.categories)}
-        with self.bench("iindex.reindexed.merge", 8):
+        with self.bench("iindex.reindexed.merge", 5):
             C.reindexed(mapping)
 
         self.params.axes = (100,)
         C = self.categorical(array=True)
         mapping = {k: k % 4 for k in range(self.params.categories)}
-        with self.bench("iindex.reindexed.merge.array", 500):
+        with self.bench("iindex.reindexed.merge.array", 210):
             C.reindexed(mapping)
 
     def test_iindex_reindexed_merge_interleaved(self):
@@ -29,5 +29,5 @@ class Test_iindex_reindexed(UnitBenchmark):
         values = numpy.arange(self.params.rows) % self.params.categories
         C = iindex.from_array(values)
         mapping = {k: k % 4 for k in range(self.params.categories)}
-        with self.bench("iindex.reindexed.merge.interleaved", None):
+        with self.bench("iindex.reindexed.merge.interleaved", 12):
             C.reindexed(mapping)

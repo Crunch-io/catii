@@ -773,7 +773,9 @@ class iindex(dict):
                 # this is much faster than heapq, and slightly faster than
                 # sortednp.kway_merge (or even custom specializations of it).
                 rowids = numpy.concatenate(rowid_lists)
-                rowids.sort()
+                # Each list is sorted; a stable sort (timsort) merges such
+                # runs instead of sorting from scratch.
+                rowids.sort(kind="stable")
                 if not assume_unique:
                     mask = numpy.empty(rowids.shape, dtype=bool)
                     mask[:1] = True
