@@ -283,3 +283,129 @@ class TestXfuncMeanMissingness:
         # Cell (1, 1) MUST be missing, because it had no inputs.
         assert arr_eq(stddevs, [[2.82842712, 67.88225099], [3.055050463303893, -1]])
         assert arr_eq(validity, [[True, True], [True, False]])
+
+
+class TestXfuncStddev2DDim2DFact:
+    """Test xfunc_stddev with 2D dimension AND 2D numeric fact array.
+
+    This tests the pattern where:
+    - dimension: categorical variable with subvariables (2D: rows x dim_subvars)
+    - fact: numeric array with subvariables (2D: rows x fact_subvars)
+
+    The cube iterates over the dimension's subvariables (scaffold), and for each,
+    computes stddev of the 2D numeric fact grouped by the categories.
+    """
+
+    # 2D dimension array: 8 rows x 3 subvariables (like a categorical with 3 subvars)
+    # Each column has 2 categories (0 and 1)
+    dim_2d = numpy.array([
+        [1, 0, 1],  # row 0
+        [0, 1, 0],  # row 1
+        [1, 0, 1],  # row 2
+        [0, 1, 0],  # row 3
+        [1, 0, 1],  # row 4
+        [0, 1, 0],  # row 5
+        [1, 0, 1],  # row 6
+        [0, 1, 0],  # row 7
+    ], dtype=numpy.uint8)
+
+    # 2D numeric fact array: 8 rows x 2 subvariables
+    fact_2d = numpy.array([
+        [1.0, 10.0],   # row 0
+        [2.0, 20.0],   # row 1
+        [3.0, 30.0],   # row 2
+        [4.0, 40.0],   # row 3
+        [5.0, 50.0],   # row 4
+        [6.0, 60.0],   # row 5
+        [7.0, 70.0],   # row 6
+        [8.0, 80.0],   # row 7
+    ])
+
+    # Weights array
+    weights = numpy.array([0.5, 1.0, 1.5, 2.0, 0.5, 1.0, 1.5, 2.0])
+
+    def test_2d_dim_2d_fact_unweighted(self):
+        """Stddev with 2D dimension and 2D numeric fact, unweighted."""
+        # dim_2d has shape (8, 3) -> 3 subvariables in the dimension
+        # fact_2d has shape (8, 2) -> 2 subvariables in the fact
+        # Output shape should be (3, 2, 2): (dim_subvars, categories, fact_subvars)
+        stddevs = xcube([self.dim_2d]).stddev(self.fact_2d)
+
+        # For dim subvar 0: cat=0 rows are [1,3,5,7], cat=1 rows are [0,2,4,6]
+        #   fact col 0: cat=0 gets [2,4,6,8], cat=1 gets [1,3,5,7]
+        #   fact col 1: cat=0 gets [20,40,60,80], cat=1 gets [10,30,50,70]
+        assert stddevs.shape == (3, 2, 2)
+
+        # Check dim subvar 0 results
+        expected_subvar0_cat0_col0 = numpy.std([2, 4, 6, 8], ddof=1)
+        expected_subvar0_cat0_col1 = numpy.std([20, 40, 60, 80], ddof=1)
+        expected_subvar0_cat1_col0 = numpy.std([1, 3, 5, 7], ddof=1)
+        expected_subvar0_cat1_col1 = numpy.std([10, 30, 50, 70], ddof=1)
+
+        assert arr_eq(stddevs[0, 0, 0], expected_subvar0_cat0_col0)
+        assert arr_eq(stddevs[0, 0, 1], expected_subvar0_cat0_col1)
+        assert arr_eq(stddevs[0, 1, 0], expected_subvar0_cat1_col0)
+        assert arr_eq(stddevs[0, 1, 1], expected_subvar0_cat1_col1)
+
+    def test_2d_dim_2d_fact_weighted(self):
+        """Stddev with 2D dimension and 2D numeric fact, weighted."""
+        stddevs = xcube([self.dim_2d]).stddev(self.fact_2d, weights=self.weights)
+
+        assert stddevs.shape == (3, 2, 2)
+        # Verify we get numeric results (not NaN)
+        assert not numpy.isnan(stddevs).any()
+
+        # Verify weighted stddev is different from unweighted
+        unweighted = xcube([self.dim_2d]).stddev(self.fact_2d)
+        assert not arr_eq(stddevs, unweighted)
+
+    def test_2d_dim_2d_fact_with_missing(self):
+        """Stddev with 2D dim and 2D fact, with missing values in fact."""
+        fact_with_nan = self.fact_2d.copy()
+        fact_with_nan[2, 0] = float("nan")  # row 2, col 0 is missing
+
+        stddevs = xcube([self.dim_2d]).stddev(fact_with_nan)
+        assert stddevs.shape == (3, 2, 2)
+
+        # Row 2 belongs to cat=1 for dim subvar 0 (and 2)
+        # So stddevs[0, 1, 0] should be NaN (missing propagated)
+        assert numpy.isnan(stddevs[0, 1, 0])
+        # But stddevs[0, 1, 1] should be valid (different fact column)
+        assert not numpy.isnan(stddevs[0, 1, 1])
+
+    def test_2d_dim_2d_fact_with_missing_ignore_missing(self):
+        """Stddev with 2D dim and 2D fact, ignore_missing=True."""
+        fact_with_nan = self.fact_2d.copy()
+        fact_with_nan[2, 0] = float("nan")
+
+        stddevs = xcube([self.dim_2d]).stddev(fact_with_nan, ignore_missing=True)
+        assert stddevs.shape == (3, 2, 2)
+
+        # With ignore_missing=True, stddevs[0, 1, 0] should be computed
+        # from rows [0, 4, 6] (excluding row 2 which has NaN)
+        expected = numpy.std([1, 5, 7], ddof=1)
+        assert arr_eq(stddevs[0, 1, 0], expected)
+
+    def test_2d_dim_2d_fact_weighted_with_missing(self):
+        """Weighted stddev with 2D dim and 2D fact, with missing values."""
+        fact_with_nan = self.fact_2d.copy()
+        fact_with_nan[2, 0] = float("nan")
+
+        stddevs = xcube([self.dim_2d]).stddev(fact_with_nan, weights=self.weights)
+        assert stddevs.shape == (3, 2, 2)
+
+        # Missing should propagate
+        assert numpy.isnan(stddevs[0, 1, 0])
+
+    def test_2d_dim_2d_fact_weighted_ignore_missing(self):
+        """Weighted stddev with 2D dim and 2D fact, ignore_missing=True."""
+        fact_with_nan = self.fact_2d.copy()
+        fact_with_nan[2, 0] = float("nan")
+
+        stddevs = xcube([self.dim_2d]).stddev(
+            fact_with_nan, weights=self.weights, ignore_missing=True
+        )
+        assert stddevs.shape == (3, 2, 2)
+
+        # With ignore_missing=True, should have valid result
+        assert not numpy.isnan(stddevs[0, 1, 0])
