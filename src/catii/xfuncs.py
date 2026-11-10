@@ -847,10 +847,25 @@ class xfunc_stddev(xfunc):
                     self.validity,
                 )
             elif self.summables.ndim == 2:
-                # Vectorized 2D fill: iterate over bins (categories), not columns.
-                # This is O(categories) instead of O(columns), which is much faster
-                # when the number of columns (subvariables) is large.
-                self._fill_2d_by_coordinates(regions, coordinates)
+                n_cols = self.summables.shape[1]
+                n_cats = regions[0].shape[0]
+
+                if n_cols > n_cats:
+                    # Many columns, few categories: iterate over bins (categories)
+                    # and vectorize across columns. This is faster when subvars >> cats.
+                    self._fill_2d_by_coordinates(regions, coordinates)
+                else:
+                    # Many categories, few columns: iterate over columns and use
+                    # bincount per column. This is faster when cats >> subvars.
+                    for col in range(n_cols):
+                        self._fill_one_by_coordinates(
+                            [r[:, col] for r in regions],
+                            coordinates,
+                            self.summables[:, col],
+                            self.wsummables[:, col],
+                            self.countables[:, col],
+                            self.validity[:, col],
+                        )
 
     def _fill_no_coordinates(self, regions):
         """Fill regions when there are no cube dimensions (no grouping).
