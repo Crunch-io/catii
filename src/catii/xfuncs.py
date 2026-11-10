@@ -835,23 +835,7 @@ class xfunc_stddev(xfunc):
         regions = self.flat_regions(regions)
 
         if coordinates is None:
-            if self.summables.ndim == 1:
-                self._fill_one_no_coordinates(
-                    regions,
-                    self.summables,
-                    self.wsummables,
-                    self.countables,
-                    self.validity,
-                )
-            elif self.summables.ndim == 2:
-                for i in range(self.summables.shape[1]):
-                    self._fill_one_no_coordinates(
-                        [r[:, i] for r in regions],
-                        self.summables[:, i],
-                        self.wsummables[:, i],
-                        self.countables[:, i],
-                        self.validity[:, i],
-                    )
+            self._fill_no_coordinates(regions)
         else:
             if self.summables.ndim == 1:
                 self._fill_one_by_coordinates(
@@ -863,31 +847,30 @@ class xfunc_stddev(xfunc):
                     self.validity,
                 )
             elif self.summables.ndim == 2:
-                for i in range(self.summables.shape[1]):
-                    self._fill_one_by_coordinates(
-                        [r[:, i] for r in regions],
-                        coordinates,
-                        self.summables[:, i],
-                        self.wsummables[:, i],
-                        self.countables[:, i],
-                        self.validity[:, i],
-                    )
+                # Vectorized 2D fill: iterate over bins (categories), not columns.
+                # This is O(categories) instead of O(columns), which is much faster
+                # when the number of columns (subvariables) is large.
+                self._fill_2d_by_coordinates(regions, coordinates)
 
-    def _fill_one_no_coordinates(
-        self, regions, summables, wsummables, countables, validity
-    ):
-        # Weighted mean
+    def _fill_no_coordinates(self, regions):
+        """Fill regions when there are no cube dimensions (no grouping).
+
+        Works for both 1D and 2D fact arrays.
+        """
         if self.ignore_missing:
             stddevs, valid_counts = regions
-            summables = summables[validity]
-            wsummables = wsummables[validity]
-            countables = countables[validity]
-            weights = None if self.weights is None else self.weights[validity]
+            summables = self.summables[self.validity]
+            wsummables = self.wsummables[self.validity]
+            countables = self.countables[self.validity]
+            weights = None if self.weights is None else self.weights[self.validity]
         else:
             stddevs, valid_counts, missing_counts = regions
+            summables = self.summables
+            wsummables = self.wsummables
+            countables = self.countables
             weights = self.weights
 
-        N = numpy.count_nonzero(validity, axis=0)
+        N = numpy.count_nonzero(self.validity, axis=0)
         if len(summables) >= 2:
             # Weighted mean
             wsums = numpy.nansum(wsummables, axis=0)
@@ -913,6 +896,77 @@ class xfunc_stddev(xfunc):
         valid_counts[:] = N
         if not self.ignore_missing:
             missing_counts[:] = len(self.summables) - N
+
+    def _fill_2d_by_coordinates(self, regions, coordinates):
+        """Fill regions for 2D fact arrays, vectorized across columns.
+
+        This method iterates over bins (categories) instead of columns,
+        computing stddev for all columns at once using vectorized operations.
+        This is O(categories * columns) but with numpy's vectorized operations
+        handling the column dimension, which is much faster than the naive
+        O(columns * categories) loop.
+        """
+        if self.ignore_missing:
+            stddevs, valid_counts = regions
+        else:
+            stddevs, valid_counts, missing_counts = regions
+
+        size = stddevs.shape[0]
+
+        # Iterate over categories (bins), not columns
+        for i, rowmask in self.bins(coordinates, size):
+            if self.ignore_missing:
+                # Filter to valid rows within this bin
+                bin_validity = self.validity[rowmask]
+                valid_in_bin = bin_validity.any(axis=0)  # Which columns have valid data
+
+                # For each column, we need to handle validity separately
+                summables_bin = self.summables[rowmask]
+                wsummables_bin = self.wsummables[rowmask]
+                countables_bin = self.countables[rowmask]
+                weights_bin = None if self.weights is None else self.weights[rowmask]
+
+                # Count valid values per column
+                N = numpy.sum(bin_validity, axis=0)
+            else:
+                summables_bin = self.summables[rowmask]
+                wsummables_bin = self.wsummables[rowmask]
+                countables_bin = self.countables[rowmask]
+                validity_bin = self.validity[rowmask]
+                weights_bin = None if self.weights is None else self.weights[rowmask]
+
+                N = numpy.sum(validity_bin, axis=0)
+
+            # Need at least 2 values for stddev
+            if len(summables_bin) >= 2:
+                # Weighted sums and counts per column
+                wsums = numpy.nansum(wsummables_bin, axis=0)
+                wcounts = numpy.nansum(countables_bin, axis=0)
+
+                with numpy.errstate(divide="ignore", invalid="ignore"):
+                    wmeans = wsums / wcounts
+
+                # Squared variances: (value - mean)^2
+                # wmeans is shape (columns,), summables_bin is shape (rows_in_bin, columns)
+                # Broadcasting: summables_bin - wmeans gives (rows_in_bin, columns)
+                squared_variances = (summables_bin - wmeans) ** 2
+
+                if weights_bin is not None:
+                    # weights_bin is 1D (rows_in_bin,), need to broadcast
+                    squared_variances = (squared_variances.T * weights_bin).T
+
+                varsums = numpy.nansum(squared_variances, axis=0)
+
+                with numpy.errstate(divide="ignore", invalid="ignore"):
+                    if weights_bin is None:
+                        stddevs[i] = numpy.sqrt(varsums / (N - 1))
+                    else:
+                        weightsums = numpy.nansum(weights_bin)
+                        stddevs[i] = numpy.sqrt((varsums / weightsums) * (N / (N - 1)))
+
+            valid_counts[i] = N
+            if not self.ignore_missing:
+                missing_counts[i] = len(summables_bin) - N
 
     def _fill_one_by_coordinates(
         self, regions, coordinates, summables, wsummables, countables, validity
