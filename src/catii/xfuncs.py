@@ -956,10 +956,6 @@ class xfunc_stddev(xfunc):
                 varsums = numpy.sum(squared_variances, axis=0)
                 with numpy.errstate(divide="ignore", invalid="ignore"):
                     stddevs[:] = numpy.sqrt(varsums / (N - 1))
-
-            valid_counts[:] = N
-            if not self.ignore_missing:
-                missing_counts[:] = 0
         else:
             # Slow path: handle missing values per column
             N = numpy.count_nonzero(self.validity, axis=0)
@@ -1002,10 +998,6 @@ class xfunc_stddev(xfunc):
                 varsums = numpy.nansum(squared_variances, axis=0)
                 with numpy.errstate(divide="ignore", invalid="ignore"):
                     stddevs[:] = numpy.sqrt(varsums / (N - 1))
-
-            valid_counts[:] = N
-            if not self.ignore_missing:
-                missing_counts[:] = n_rows - N
 
         valid_counts[:] = N
         if not self.ignore_missing:
