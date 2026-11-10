@@ -1029,27 +1029,12 @@ class xfunc_stddev(xfunc):
 
         # Iterate over categories (bins), not columns
         for i, rowmask in self.bins(coordinates, size):
-            if self.ignore_missing:
-                # Filter to valid rows within this bin
-                bin_validity = self.validity[rowmask]
-                valid_in_bin = bin_validity.any(axis=0)  # Which columns have valid data
-
-                # For each column, we need to handle validity separately
-                summables_bin = self.summables[rowmask]
-                wsummables_bin = self.wsummables[rowmask]
-                countables_bin = self.countables[rowmask]
-                weights_bin = None if self.weights is None else self.weights[rowmask]
-
-                # Count valid values per column
-                N = numpy.sum(bin_validity, axis=0)
-            else:
-                summables_bin = self.summables[rowmask]
-                wsummables_bin = self.wsummables[rowmask]
-                countables_bin = self.countables[rowmask]
-                validity_bin = self.validity[rowmask]
-                weights_bin = None if self.weights is None else self.weights[rowmask]
-
-                N = numpy.sum(validity_bin, axis=0)
+            summables_bin = self.summables[rowmask]
+            wsummables_bin = self.wsummables[rowmask]
+            countables_bin = self.countables[rowmask]
+            validity_bin = self.validity[rowmask]
+            N = numpy.sum(validity_bin, axis=0)
+            weights_bin = None if self.weights is None else self.weights[rowmask]
 
             # Need at least 2 values for stddev
             if len(summables_bin) >= 2:
