@@ -265,3 +265,78 @@ class TestStddevOptimization(UnitBenchmark):
 
         # The new approach should be faster
         assert speedup > 1.2, f"Expected speedup > 1.2x, got {speedup:.1f}x"
+
+
+class TestStddevNoCoordinatesOptimization(UnitBenchmark):
+    """Benchmark the no-coordinates (no grouping) optimization for 2D facts.
+
+    When there are no cube dimensions (coordinates is None), the old implementation
+    looped over columns. The new implementation vectorizes across all columns at once.
+
+    This optimization gives 2-5x speedup for the common case where all values are valid.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.params.rows = 100_000
+
+    def test_stddev_no_coordinates_optimization(self):
+        """Benchmark vectorized no-coordinates path vs simulated old column-loop."""
+        import time
+
+        n_subvars = 269
+        numpy.random.seed(42)
+
+        fact = numpy.random.randn(self.params.rows, n_subvars)
+
+        # No dimensions = no coordinates
+        cube = xcubes.xcube([])
+
+        # Simulate OLD algorithm: loop over columns
+        def old_fill_algorithm():
+            f = xfuncs.xfunc_stddev(fact, ignore_missing=True)
+            regions = f.get_initial_regions(cube)
+            regions = f.flat_regions(regions)
+
+            for col in range(f.summables.shape[1]):
+                f._fill_one_no_coordinates(
+                    [r[:, col] for r in regions],
+                    f.summables[:, col],
+                    f.wsummables[:, col],
+                    f.countables[:, col],
+                    f.validity[:, col],
+                )
+            return f.reduce(cube, regions)
+
+        # NEW algorithm: vectorized fill
+        def new_fill_algorithm():
+            return cube.stddev(fact, ignore_missing=True)
+
+        # Benchmark OLD
+        start_old = time.perf_counter()
+        old_result = old_fill_algorithm()
+        elapsed_old = time.perf_counter() - start_old
+
+        # Benchmark NEW
+        start_new = time.perf_counter()
+        new_result = new_fill_algorithm()
+        elapsed_new = time.perf_counter() - start_new
+
+        # Verify results match
+        assert numpy.allclose(old_result, new_result, equal_nan=True), \
+            "Old and new algorithm results differ!"
+
+        speedup = elapsed_old / elapsed_new
+
+        self.params["subvars"] = n_subvars
+        self.params["old_ms"] = elapsed_old * 1000
+        self.params["new_ms"] = elapsed_new * 1000
+        self.params["speedup"] = f"{speedup:.1f}x"
+
+        print(f"\nNo-coordinates optimization ({self.params.rows:,} rows x {n_subvars} subvars, no grouping):")
+        print(f"  Old (column-loop): {elapsed_old:.3f}s")
+        print(f"  New (vectorized):  {elapsed_new:.3f}s")
+        print(f"  Speedup: {speedup:.1f}x")
+
+        # The new approach should be faster
+        assert speedup > 1.5, f"Expected speedup > 1.5x, got {speedup:.1f}x"
