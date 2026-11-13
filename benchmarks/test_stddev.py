@@ -178,4 +178,180 @@ class TestStddev2DDim2DFact(UnitBenchmark):
             cube.calculate([xfuncs.xfunc_stddev(N, weights=W)])
 
 
+class TestStddevManySubvarsFewCategories(UnitBenchmark):
+    """Benchmark stddev with 2D dimension having many subvariables.
+
+    This reproduces the production scenario where:
+    - Dimension: 2D categorical array with 269 subvariables, each with 3 categories
+    - Fact: 2D numeric array with matching 269 subvariables  
+    - 561K rows
+
+    The cube scaffold iterates over the 269 dimension subvariables. For each,
+    it computes stddev of the 1D fact slice grouped by the 3 categories.
+    
+    The bottleneck is 269 separate stddev calculations, each on 561K rows × 3 cats.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.params.rows = 561000  # Match production
+        self.params.categories = 3  # 3 categories per subvar
+        self.params.density = 1.0  # Full density like production
+        # Note: axes is set per-test since we vary dimension subvars
+
+    def numeric_2d(self, subvars):
+        """Return a 2D numeric array with the given number of subvariables."""
+        base = self.numeric()
+        return numpy.column_stack([base + i for i in range(subvars)])
+
+    def test_stddev_2d_dim_269subvars_3cats(self):
+        """Stddev with 2D dim (3 cats × 269 subvars): the timeout case.
+
+        This is the configuration that timed out at 120s in production.
+        The scaffold iterates 269 times, each computing stddev over 3 categories.
+        """
+        self.params.axes = (269,)  # 269 dimension subvariables
+        CA = self.categorical(indexed=False, array=True)  # 3 cats x 269 axes
+        N = self.numeric_2d(269)
+        self.params["dim_subvars"] = 269
+        cube = xcubes.xcube([CA])
+        # Current implementation times out at 120s.
+        with self.bench("xcube.stddev.2d_dim_3x269.fact_269", threshold_ms=120000):
+            cube.calculate([xfuncs.xfunc_stddev(N)])
+
+    def test_stddev_2d_dim_23subvars_3cats(self):
+        """Stddev with 2D dim (3 cats × 23 subvars): the slow but working case.
+
+        This is the configuration that took 18.6s in production.
+        The scaffold iterates 23 times, each computing stddev over 3 categories.
+        """
+        self.params.axes = (23,)  # 23 dimension subvariables
+        CA = self.categorical(indexed=False, array=True)  # 3 cats x 23 axes
+        N = self.numeric_2d(23)
+        self.params["dim_subvars"] = 23
+        cube = xcubes.xcube([CA])
+        with self.bench("xcube.stddev.2d_dim_3x23.fact_23", threshold_ms=20000):
+            cube.calculate([xfuncs.xfunc_stddev(N)])
+
+
+class TestStddevProfile(UnitBenchmark):
+    """Profile stddev with 1 dimension subvar to understand per-iteration cost."""
+
+    def setUp(self):
+        super().setUp()
+        self.params.rows = 561000
+        self.params.categories = 3
+        self.params.density = 1.0
+
+    def numeric_2d(self, subvars):
+        base = self.numeric()
+        return numpy.column_stack([base + i for i in range(subvars)])
+
+    def test_stddev_1_dim_subvar_269_fact_cols(self):
+        """Single dimension subvar with 269-column fact array.
+        
+        This isolates the cost of one stddev calculation on a 269-column fact.
+        If this is ~1s, then 269 iterations = 269s (explaining the timeout).
+        """
+        self.params.axes = (1,)  # 1 dimension subvariable
+        CA = self.categorical(indexed=False, array=True)  # 3 cats x 1 axis
+        N = self.numeric_2d(269)  # 269-column fact
+        self.params["dim_subvars"] = 1
+        self.params["fact_cols"] = 269
+        cube = xcubes.xcube([CA])
+        with self.bench("xcube.stddev.1_dim_subvar.269_fact_cols", threshold_ms=5000):
+            cube.calculate([xfuncs.xfunc_stddev(N)])
+
+    def test_stddev_1_dim_subvar_1_fact_col(self):
+        """Single dimension subvar with 1-column fact array.
+        
+        This isolates the per-column cost.
+        """
+        self.params.axes = (1,)  # 1 dimension subvariable
+        CA = self.categorical(indexed=False, array=True)  # 3 cats x 1 axis
+        N = self.numeric()  # 1-column fact
+        self.params["dim_subvars"] = 1
+        self.params["fact_cols"] = 1
+        cube = xcubes.xcube([CA])
+        with self.bench("xcube.stddev.1_dim_subvar.1_fact_col", threshold_ms=500):
+            cube.calculate([xfuncs.xfunc_stddev(N)])
+
+    def test_stddev_269_scaffolds_with_sliced_facts(self):
+        """269 scaffold iterations, each with matching 1-col fact slice.
+        
+        This demonstrates what performance SHOULD be if the fact array were
+        sliced to match each scaffold iteration. Instead of processing all 269
+        columns 269 times (269×269=72K operations), this processes 1 column 
+        269 times (269 operations).
+        
+        Expected: ~5s (much faster than 269 × 8.2s = 2200s with full fact)
+        """
+        self.params.axes = (269,)  # 269 dimension subvariables  
+        CA = self.categorical(indexed=False, array=True)  # 3 cats x 269 axes
+        self.params["dim_subvars"] = 269
+        self.params["approach"] = "sliced_1col_per_scaffold"
+        
+        # Create the data once
+        base = self.numeric()
+        
+        def compute_sliced():
+            # Manually iterate like scaffold does, but with sliced facts
+            for i in range(269):
+                # Slice dimension to single scaffold position
+                CA_slice = CA[:, i]  # shape (rows,) - single column
+                fact_slice = base + i  # 1D fact for this scaffold position
+                mini_cube = xcubes.xcube([CA_slice], interacting_shape=(3,))
+                mini_cube.calculate([xfuncs.xfunc_stddev(fact_slice)])
+        
+        with self.bench("xcube.stddev.269_scaffolds_sliced_facts", threshold_ms=15000):
+            compute_sliced()
+
+    def test_stddev_2d_fact_aligned_with_scaffold(self):
+        """Test stddev with 2D fact whose columns match scaffold subvars.
+        
+        This is the actual production case: 
+        - Dimension: 2D categorical with 23 subvars
+        - Fact: 2D numeric with 23 columns
+        - Each scaffold iteration should only process the corresponding fact column
+        
+        With the fix, this should be ~23x faster than processing all columns.
+        Current (broken): 23 iterations × 23 columns = 529 column-iterations
+        Fixed: 23 iterations × 1 column = 23 column-iterations
+        """
+        self.params.axes = (23,)  # 23 dimension subvariables
+        CA = self.categorical(indexed=False, array=True)  # 3 cats x 23 axes
+        N = self.numeric_2d(23)  # 23-column fact, aligned with scaffold
+        self.params["dim_subvars"] = 23
+        self.params["fact_cols"] = 23
+        self.params["approach"] = "aligned_fact_columns"
+        
+        cube = xcubes.xcube([CA])
+        
+        # This should be fast (~500ms) if fact is sliced per scaffold iteration
+        # But is slow (~11s) if all 23 columns are processed every iteration
+        with self.bench("xcube.stddev.aligned_2d_fact", threshold_ms=2000):
+            cube.calculate([xfuncs.xfunc_stddev(N)])
+
+    def test_stddev_2d_fact_aligned_269_subvars(self):
+        """Test stddev with 269 aligned subvars (production timeout case).
+        
+        This reproduces the production timeout:
+        - Dimension: 2D categorical with 269 subvars
+        - Fact: 2D numeric with 269 columns
+        
+        Without fix: 269 × 269 = 72,361 column-iterations = timeout
+        With fix: 269 × 1 = 269 column-iterations = ~6s
+        """
+        self.params.axes = (269,)  # 269 dimension subvariables
+        CA = self.categorical(indexed=False, array=True)  # 3 cats x 269 axes
+        N = self.numeric_2d(269)  # 269-column fact, aligned with scaffold
+        self.params["dim_subvars"] = 269
+        self.params["fact_cols"] = 269
+        self.params["approach"] = "aligned_fact_columns"
+        
+        cube = xcubes.xcube([CA])
+        
+        # With the fix, this should complete in ~6-7s
+        with self.bench("xcube.stddev.aligned_269_subvars", threshold_ms=15000):
+            cube.calculate([xfuncs.xfunc_stddev(N)])
 

@@ -217,7 +217,12 @@ class xcube:
                     # our outer dimensions.
                     regions = [region[tuple(flattened_slice)] for region in regions]
 
-                func.fill(coordinates, regions)
+                func.fill(
+                    coordinates,
+                    regions,
+                    scaffold_slice=tuple(flattened_slice) if flattened_slice else None,
+                    scaffold_shape=self.scaffold_shape,
+                )
                 if self.debug:
                     print(func, ":=", regions)
 
