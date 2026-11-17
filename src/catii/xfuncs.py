@@ -228,7 +228,7 @@ class xfunc_count(xfunc):
                 missing_counts = numpy.zeros(shape, dtype=int)
                 return counts, valid_counts, missing_counts
 
-    def fill(self, coordinates, regions, scaffold_slice=None, scaffold_shape=None):
+    def fill(self, coordinates, regions):
         """Fill the `regions` arrays with distributions contingent on coordinates.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
@@ -386,7 +386,7 @@ class xfunc_valid_count(xfunc):
                 missing_counts = numpy.zeros(shape, dtype=int)
                 return counts, valid_counts, missing_counts
 
-    def fill(self, coordinates, regions, scaffold_slice=None, scaffold_shape=None):
+    def fill(self, coordinates, regions):
         """Fill the `regions` arrays with distributions contingent on coordinates.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
@@ -539,7 +539,7 @@ class xfunc_sum(xfunc):
             missing_counts = numpy.zeros(shape, dtype=int)
             return sums, valid_counts, missing_counts
 
-    def fill(self, coordinates, regions, scaffold_slice=None, scaffold_shape=None):
+    def fill(self, coordinates, regions):
         """Fill the `regions` arrays with distributions contingent on coordinates.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
@@ -680,7 +680,7 @@ class xfunc_mean(xfunc):
             missing_counts = numpy.zeros(shape, dtype=int)
             return sums, valid_counts, missing_counts
 
-    def fill(self, coordinates, regions, scaffold_slice=None, scaffold_shape=None):
+    def fill(self, coordinates, regions):
         """Fill the `regions` arrays with distributions contingent on coordinates.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
@@ -824,7 +824,7 @@ class xfunc_stddev(xfunc):
             missing_counts = numpy.zeros(shape, dtype=int)
             return stddevs, valid_counts, missing_counts
 
-    def fill(self, coordinates, regions, scaffold_slice=None, scaffold_shape=None):
+    def fill(self, coordinates, regions):
         """Fill the `regions` arrays with distributions contingent on coordinates.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
@@ -834,65 +834,30 @@ class xfunc_stddev(xfunc):
         # Flatten our regions so flat bincount output can overwrite it in place.
         regions = self.flat_regions(regions)
 
-        summables = self.summables
-        wsummables = self.wsummables
-        countables = self.countables
-        validity = self.validity
-
-        # Optimization for paired (aligned) subvariables: when the scaffold shape
-        # equals the fact's column count (e.g., both are 269), each scaffold
-        # iteration should only process the corresponding fact column (diagonal).
-        # This reduces O(dim_subvars × fact_cols) to O(dim_subvars) work.
-        #
-        # Only applies when:
-        # 1. scaffold_slice is a single index (1D scaffold)
-        # 2. fact is 2D
-        # 3. scaffold_shape[0] == fact_cols (aligned case)
-        # 4. regions are 2D (cats × fact_cols)
-        if (
-            scaffold_slice is not None
-            and scaffold_shape is not None
-            and len(scaffold_slice) == 1
-            and len(scaffold_shape) == 1
-            and summables.ndim == 2
-            and scaffold_shape[0] == summables.shape[1]  # aligned case
-        ):
-            col_idx = scaffold_slice[0]
-            if col_idx < summables.shape[1]:
-                # Check if regions are 2D (cats × fact_cols)
-                if len(regions) > 0 and regions[0].ndim == 2:
-                    if regions[0].shape[1] == summables.shape[1]:
-                        # Aligned case: slice both fact and regions to column idx
-                        summables = summables[:, col_idx]
-                        wsummables = wsummables[:, col_idx]
-                        countables = countables[:, col_idx]
-                        validity = validity[:, col_idx]
-                        regions = [r[:, col_idx] for r in regions]
-
         if coordinates is None:
-            if summables.ndim == 1:
+            if self.summables.ndim == 1:
                 self._fill_one_no_coordinates(
                     regions,
-                    summables,
-                    wsummables,
-                    countables,
-                    validity,
+                    self.summables,
+                    self.wsummables,
+                    self.countables,
+                    self.validity,
                 )
-            elif summables.ndim == 2:
+            elif self.summables.ndim == 2:
                 # Vectorized across all columns at once
                 self._fill_2d_no_coordinates(regions)
         else:
-            if summables.ndim == 1:
+            if self.summables.ndim == 1:
                 self._fill_one_by_coordinates(
                     regions,
                     coordinates,
-                    summables,
-                    wsummables,
-                    countables,
-                    validity,
+                    self.summables,
+                    self.wsummables,
+                    self.countables,
+                    self.validity,
                 )
-            elif summables.ndim == 2:
-                n_cols = summables.shape[1]
+            elif self.summables.ndim == 2:
+                n_cols = self.summables.shape[1]
                 n_cats = regions[0].shape[0]
 
                 if n_cols > n_cats:
@@ -906,10 +871,10 @@ class xfunc_stddev(xfunc):
                         self._fill_one_by_coordinates(
                             [r[:, col] for r in regions],
                             coordinates,
-                            summables[:, col],
-                            wsummables[:, col],
-                            countables[:, col],
-                            validity[:, col],
+                            self.summables[:, col],
+                            self.wsummables[:, col],
+                            self.countables[:, col],
+                            self.validity[:, col],
                         )
 
     def _fill_one_no_coordinates(
@@ -1251,7 +1216,7 @@ class xfunc_quantile(xfunc):
         qs = numpy.full(shape, float("nan"), dtype=float)
         return (qs,)
 
-    def fill(self, coordinates, regions, scaffold_slice=None, scaffold_shape=None):
+    def fill(self, coordinates, regions):
         """Fill the `regions` arrays with distributions contingent on coordinates.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
@@ -1377,7 +1342,7 @@ class xfunc_op_base(xfunc):
         output_validity = numpy.zeros(shape, dtype=bool)
         return output_values, output_validity
 
-    def fill(self, coordinates, regions, scaffold_slice=None, scaffold_shape=None):
+    def fill(self, coordinates, regions):
         """Fill the `regions` arrays with distributions contingent on coordinates.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
@@ -1521,7 +1486,7 @@ class xfunc_corrcoef(xfunc):
         corrcoefs = numpy.full(shape, float("nan"), dtype=float)
         return (corrcoefs,)
 
-    def fill(self, coordinates, regions, scaffold_slice=None, scaffold_shape=None):
+    def fill(self, coordinates, regions):
         """Fill the `regions` arrays with distributions contingent on coordinates.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,
@@ -1617,7 +1582,7 @@ class xfunc_covariance(xfunc):
         covs = numpy.full(shape, float("nan"), dtype=float)
         return (covs,)
 
-    def fill(self, coordinates, regions, scaffold_slice=None, scaffold_shape=None):
+    def fill(self, coordinates, regions):
         """Fill the `regions` arrays with distributions contingent on coordinates.
 
         The given `regions` are assumed to be part of a (possibly larger) cube,

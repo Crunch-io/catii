@@ -11,6 +11,24 @@ from . import xfuncs
 
 BIG_REGIONS = 1 << 30  # 1G, max input data size before we use threads <shrug>
 
+# Work factors for parallelization decisions.
+# BIG_REGIONS was calibrated for count (work=1). Other funcs multiply
+# the data volume by their work factor when deciding whether to parallelize.
+# Values are theoretical complexity relative to count, multiplied by 2.
+FUNC_WORK_FACTOR = {
+    "xfunc_count": 1,
+    "xfunc_max": 2,
+    "xfunc_min": 2,
+    "xfunc_sum": 4,
+    "xfunc_mean": 4,
+    "xfunc_valid_count": 4,
+    "xfunc_stddev": 8,
+    "xfunc_quantile": 20,
+    "xfunc_corrcoef": 10,
+    "xfunc_covariance": 10,
+}
+DEFAULT_WORK_FACTOR = 1  # For unknown funcs
+
 
 class xcube:
     """An N-dimensional contingency cube of NumPy arrays.
@@ -106,6 +124,25 @@ class xcube:
             raise TypeError("Cannot calculate cubes with more than %s cells." % maxint)
         self.mintype = mintype
 
+    def should_parallelize(self, funcs):
+        """Determine if parallelization should be enabled based on func complexity.
+
+        BIG_REGIONS was calibrated for count (work=1). For other funcs,
+        we multiply the data volume by their work factor. This allows expensive
+        funcs like stddev to trigger parallelization at lower data volumes.
+
+        Formula: (numrows * scaffold_size * max_work_factor) >= BIG_REGIONS
+        """
+        if self.scaffold_size <= 2:
+            return False
+
+        work_factor = max(
+            FUNC_WORK_FACTOR.get(f.__class__.__name__, DEFAULT_WORK_FACTOR)
+            for f in funcs
+        )
+        numrows = self.dims[0].shape[0]
+        return numrows * self.scaffold_size * work_factor >= BIG_REGIONS
+
     # ----------------------------- interaction ----------------------------- #
 
     def strided_dims(self):
@@ -164,6 +201,11 @@ class xcube:
 
     def calculate(self, funcs):
         """Return a tuple of aggregates, usually one NumPy array for each xfunc."""
+        # Update parallelization decision based on func complexity.
+        # The initial self.parallel was set without knowing the funcs.
+        if not self.parallel and self.should_parallelize(funcs):
+            self.parallel = True
+
         if self.debug:
             print("\nxcube.calculate(%s):" % (funcs,))
             print(
@@ -220,8 +262,6 @@ class xcube:
                 func.fill(
                     coordinates,
                     regions,
-                    scaffold_slice=tuple(flattened_slice) if flattened_slice else None,
-                    scaffold_shape=self.scaffold_shape,
                 )
                 if self.debug:
                     print(func, ":=", regions)
