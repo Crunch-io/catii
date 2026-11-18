@@ -64,10 +64,6 @@ class xcube:
         # product forms an independent interaction.
         self.scaffold_shape = tuple(e for d in self.dims for e in d.shape[1:])
         self.scaffold_size = reduce(operator.mul, self.scaffold_shape, 1)
-        self.parallel = (
-            self.scaffold_size > 2
-            and (self.dims[0].shape[0] * self.scaffold_size) >= BIG_REGIONS
-        )
 
         # Each independent interaction has the same shape.
         if interacting_shape is None:
@@ -201,11 +197,6 @@ class xcube:
 
     def calculate(self, funcs):
         """Return a tuple of aggregates, usually one NumPy array for each xfunc."""
-        # Update parallelization decision based on func complexity.
-        # The initial self.parallel was set without knowing the funcs.
-        if not self.parallel and self.should_parallelize(funcs):
-            self.parallel = True
-
         if self.debug:
             print("\nxcube.calculate(%s):" % (funcs,))
             print(
@@ -272,7 +263,7 @@ class xcube:
                 if bucket["start"] is None:
                     bucket["start"] = start
 
-        if self.parallel:
+        if self.should_parallelize(funcs):
             with closing(self.pool_class(self.poolsize)) as pool:
                 pool.map(fill_one_cube, self.product)
         else:
