@@ -90,6 +90,9 @@ class ffunc:
         to calculate the function. It is used to check if the cube needs
         parallelization. It must be set to a number otherwise the calculation raises
         an exception.
+
+        TODO: The _work_factor values are currently educated guesses. We should
+        calculate them empirically through benchmarking.
         """
         if self._work_factor is None:
             raise ValueError(f"func {self.__class__.__name__}: work_factor cannot be None")
