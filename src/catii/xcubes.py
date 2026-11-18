@@ -11,22 +11,6 @@ from . import xfuncs
 
 BIG_REGIONS = 1 << 30  # 1G, max input data size before we use threads <shrug>
 
-# Work factors for parallelization decisions.
-# BIG_REGIONS was calibrated for count (work=1). Other funcs multiply
-# the data volume by their work factor when deciding whether to parallelize.
-FUNC_WORK_FACTOR = {
-    xfuncs.xfunc_count: 1,
-    xfuncs.xfunc_valid_count: 4,
-    xfuncs.xfunc_sum: 4,
-    xfuncs.xfunc_mean: 4,
-    xfuncs.xfunc_max: 2,
-    xfuncs.xfunc_min: 2,
-    xfuncs.xfunc_stddev: 8,
-    xfuncs.xfunc_quantile: 20,
-    xfuncs.xfunc_corrcoef: 10,
-    xfuncs.xfunc_covariance: 10,
-}
-
 
 class xcube:
     """An N-dimensional contingency cube of NumPy arrays.
@@ -130,10 +114,7 @@ class xcube:
         if self.scaffold_size <= 2:
             return False
 
-        work_factor = max(
-            FUNC_WORK_FACTOR.get(type(f), 1)
-            for f in funcs
-        )
+        work_factor = sum(f.work_factor for f in funcs)
         numrows = self.dims[0].shape[0]
         return numrows * self.scaffold_size * work_factor >= BIG_REGIONS
 

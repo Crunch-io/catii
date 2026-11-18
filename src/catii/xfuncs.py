@@ -88,6 +88,21 @@ class xfunc:
     additional axes, as well.
     """
 
+    _work_factor = None
+
+
+    @property
+    def work_factor(self):
+        """
+        The work_factor is a number used to measure the amount of work needed
+        to calculate the function. It is used to check if the cube needs
+        parallelization. It must be set to a number otherwise the calculation raises
+        an exception.
+        """
+        if self._work_factor is None:
+            raise ValueError(f"func {self.__class__.__name__}: work_factor cannot be None")
+        return self._work_factor if getattr(self, "weights", None) is None else 2 * self._work_factor
+
     def get_initial_regions(self, cube):
         """Return empty NumPy arrays to fill."""
         raise NotImplementedError
@@ -184,6 +199,8 @@ class xfunc_count(xfunc):
     0 in the former and False in the latter.
     """
 
+    _work_factor = 1
+
     def __init__(
         self, weights=None, N=None, ignore_missing=False, return_missing_as=NaN
     ):
@@ -208,6 +225,12 @@ class xfunc_count(xfunc):
         if N is None and self.weights is not None and self.weights.shape:
             N = self.weights.shape[0]
         self.N = N
+
+    @property
+    def work_factor(self):
+        if self._work_factor is None:
+            raise ValueError(f"func {self.__class__.__name__}: work_factor cannot be None")
+        return self._work_factor if self.weights is None else 2 * self._work_factor
 
     def get_initial_regions(self, cube):
         """Return empty NumPy arrays to fill."""
@@ -336,6 +359,8 @@ class xfunc_valid_count(xfunc):
     and a second "validity" NumPy array of booleans. Missing values will have
     0 in the former and False in the latter.
     """
+
+    _work_factor = 4
 
     def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
         _, validity = as_separate_validity(arr)
@@ -495,6 +520,8 @@ class xfunc_sum(xfunc):
     0 in the former and False in the latter.
     """
 
+    _work_factor = 4
+
     def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
         summables, validity = as_separate_validity(arr)
         self.shape = summables.shape[1:]
@@ -632,6 +659,8 @@ class xfunc_mean(xfunc):
     and a second "validity" NumPy array of booleans. Missing values will have
     0 in the former and False in the latter.
     """
+
+    _work_factor = 4
 
     def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
         summables, validity = as_separate_validity(arr)
@@ -775,6 +804,8 @@ class xfunc_stddev(xfunc):
     and a second "validity" NumPy array of booleans. Missing values will have
     0 in the former and False in the latter.
     """
+
+    _work_factor = 8
 
     def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
         summables, validity = as_separate_validity(arr)
@@ -1156,6 +1187,8 @@ class xfunc_quantile(xfunc):
     former and False in the latter.
     """
 
+    _work_factor = 20
+
     def __init__(
         self,
         arr,
@@ -1408,6 +1441,7 @@ class xfunc_max(xfunc_op_base):
     former and False in the latter.
     """
 
+    _work_factor = 2
     op = staticmethod(numpy.amax)
 
 
@@ -1426,6 +1460,7 @@ class xfunc_min(xfunc_op_base):
     former and False in the latter.
     """
 
+    _work_factor = 2
     op = staticmethod(numpy.amin)
 
 
@@ -1450,6 +1485,8 @@ class xfunc_corrcoef(xfunc):
     "validity" NumPy array of booleans. Missing values will have 0 in the
     former and False in the latter.
     """
+
+    _work_factor = 10
 
     def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
         arr, validity = as_separate_validity(arr)
@@ -1545,6 +1582,8 @@ class xfunc_covariance(xfunc):
     "validity" NumPy array of booleans. Missing values will have 0 in the
     former and False in the latter.
     """
+
+    _work_factor = 10
 
     def __init__(self, arr, weights=None, ignore_missing=False, return_missing_as=NaN):
         arr, validity = as_separate_validity(arr)
