@@ -8,9 +8,18 @@ import numpy
 
 from . import ffuncs
 from .set_operations import set_intersect_merge_np
-from .xcubes import FUNC_WORK_FACTOR, DEFAULT_WORK_FACTOR
 
 BIG_REGIONS = 1 << 30  # 1G, max input data size before we use threads <shrug>
+
+# Work factors for parallelization decisions.
+# BIG_REGIONS was calibrated for count (work=1). Other funcs multiply
+# the data volume by their work factor when deciding whether to parallelize.
+FUNC_WORK_FACTOR = {
+    ffuncs.ffunc_count: 1,
+    ffuncs.ffunc_valid_count: 4,
+    ffuncs.ffunc_sum: 4,
+    ffuncs.ffunc_mean: 4,
+}
 
 
 class ccube:
@@ -236,7 +245,7 @@ class ccube:
             return False
 
         work_factor = max(
-            FUNC_WORK_FACTOR.get(f.__class__.__name__, DEFAULT_WORK_FACTOR)
+            FUNC_WORK_FACTOR.get(type(f), 1)
             for f in funcs
         )
         numrows = self.dims[0].shape[0]

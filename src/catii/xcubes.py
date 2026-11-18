@@ -14,20 +14,18 @@ BIG_REGIONS = 1 << 30  # 1G, max input data size before we use threads <shrug>
 # Work factors for parallelization decisions.
 # BIG_REGIONS was calibrated for count (work=1). Other funcs multiply
 # the data volume by their work factor when deciding whether to parallelize.
-# Values are theoretical complexity relative to count, multiplied by 2.
 FUNC_WORK_FACTOR = {
-    "xfunc_count": 1,
-    "xfunc_max": 2,
-    "xfunc_min": 2,
-    "xfunc_sum": 4,
-    "xfunc_mean": 4,
-    "xfunc_valid_count": 4,
-    "xfunc_stddev": 8,
-    "xfunc_quantile": 20,
-    "xfunc_corrcoef": 10,
-    "xfunc_covariance": 10,
+    xfuncs.xfunc_count: 1,
+    xfuncs.xfunc_valid_count: 4,
+    xfuncs.xfunc_sum: 4,
+    xfuncs.xfunc_mean: 4,
+    xfuncs.xfunc_max: 2,
+    xfuncs.xfunc_min: 2,
+    xfuncs.xfunc_stddev: 8,
+    xfuncs.xfunc_quantile: 20,
+    xfuncs.xfunc_corrcoef: 10,
+    xfuncs.xfunc_covariance: 10,
 }
-DEFAULT_WORK_FACTOR = 1  # For unknown funcs
 
 
 class xcube:
@@ -133,7 +131,7 @@ class xcube:
             return False
 
         work_factor = max(
-            FUNC_WORK_FACTOR.get(f.__class__.__name__, DEFAULT_WORK_FACTOR)
+            FUNC_WORK_FACTOR.get(type(f), 1)
             for f in funcs
         )
         numrows = self.dims[0].shape[0]
