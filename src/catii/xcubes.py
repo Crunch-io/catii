@@ -46,10 +46,6 @@ class xcube:
         # product forms an independent interaction.
         self.scaffold_shape = tuple(e for d in self.dims for e in d.shape[1:])
         self.scaffold_size = reduce(operator.mul, self.scaffold_shape, 1)
-        self.parallel = (
-            self.scaffold_size > 2
-            and (self.dims[0].shape[0] * self.scaffold_size) >= BIG_REGIONS
-        )
 
         # Each independent interaction has the same shape.
         if interacting_shape is None:
@@ -105,6 +101,22 @@ class xcube:
         else:
             raise TypeError("Cannot calculate cubes with more than %s cells." % maxint)
         self.mintype = mintype
+
+    def should_parallelize(self, funcs):
+        """Determine if parallelization should be enabled based on func complexity.
+
+        BIG_REGIONS was calibrated for count (work=1). For other funcs,
+        we multiply the data volume by their work factor. This allows expensive
+        funcs like stddev to trigger parallelization at lower data volumes.
+
+        Formula: (numrows * scaffold_size * max_work_factor) >= BIG_REGIONS
+        """
+        if self.scaffold_size <= 2:
+            return False
+
+        work_factor = sum(f.work_factor for f in funcs)
+        numrows = self.dims[0].shape[0]
+        return numrows * self.scaffold_size * work_factor >= BIG_REGIONS
 
     # ----------------------------- interaction ----------------------------- #
 
@@ -217,7 +229,10 @@ class xcube:
                     # our outer dimensions.
                     regions = [region[tuple(flattened_slice)] for region in regions]
 
-                func.fill(coordinates, regions)
+                func.fill(
+                    coordinates,
+                    regions,
+                )
                 if self.debug:
                     print(func, ":=", regions)
 
@@ -227,7 +242,7 @@ class xcube:
                 if bucket["start"] is None:
                     bucket["start"] = start
 
-        if self.parallel:
+        if self.should_parallelize(funcs):
             with closing(self.pool_class(self.poolsize)) as pool:
                 pool.map(fill_one_cube, self.product)
         else:

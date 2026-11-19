@@ -1,6 +1,7 @@
 import gc
 import os
 import timeit
+from unittest import mock
 
 import numpy
 
@@ -41,8 +42,8 @@ class DataGenerator:
                 weights = None
             dims = [self.variable(R, C, D, S) for iv in range(IV)]
             cube = ccube(dims)
-            cube.parallel = parallel
-            elapsed = min(timeit.repeat(lambda: cube.count(weights), number=1))
+            with mock.patch.object(cube, "should_parallelize", return_value=parallel):
+                elapsed = min(timeit.repeat(lambda: cube.count(weights), number=1))
             self.ccube_output[key] = elapsed
             print("ccube:", elapsed, key)
 
@@ -61,8 +62,8 @@ class DataGenerator:
                 weights = None
             dims = [self.variable(R, C, D, S).to_array() for iv in range(IV)]
             cube = xcube(dims)
-            cube.parallel = parallel
-            elapsed = min(timeit.repeat(lambda: cube.count(weights), number=1))
+            with mock.patch.object(cube, "should_parallelize", return_value=parallel):
+                elapsed = min(timeit.repeat(lambda: cube.count(weights), number=1))
             self.xcube_output[key] = elapsed
             print("xcube:", elapsed, key)
 

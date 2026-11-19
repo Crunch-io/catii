@@ -81,6 +81,23 @@ def as_separate_validity(arr):
 class ffunc:
     """A base class for frequency (and other aggregate) functions."""
 
+    _work_factor = None
+
+    @property
+    def work_factor(self):
+        """
+        The work_factor is a number used to measure the amount of work needed
+        to calculate the function. It is used to check if the cube needs
+        parallelization. It must be set to a number otherwise the calculation raises
+        an exception.
+
+        TODO: The _work_factor values are currently educated guesses. We should
+        calculate them empirically through benchmarking.
+        """
+        if self._work_factor is None:
+            raise ValueError(f"func {self.__class__.__name__}: work_factor cannot be None")
+        return self._work_factor if self.weights is None else 2 * self._work_factor
+
     def get_initial_regions(self, cube):
         """Return NumPy arrays to fill, empty except for corner values."""
         raise NotImplementedError
@@ -156,6 +173,8 @@ class ffunc_count(ffunc):
     and a second "validity" NumPy array of booleans. Missing values will have
     0 in the former and False in the latter.
     """
+
+    _work_factor = 1
 
     def __init__(
         self,
@@ -346,6 +365,8 @@ class ffunc_valid_count(ffunc):
     0 in the former and False in the latter.
     """
 
+    _work_factor = 4
+
     def __init__(
         self,
         arr,
@@ -504,6 +525,8 @@ class ffunc_sum(ffunc):
     0 in the former and False in the latter.
     """
 
+    _work_factor = 4
+
     def __init__(
         self,
         arr,
@@ -645,6 +668,8 @@ class ffunc_mean(ffunc):
     and a second "validity" NumPy array of booleans. Missing values will have
     0 in the former and False in the latter.
     """
+
+    _work_factor = 4
 
     def __init__(
         self,
