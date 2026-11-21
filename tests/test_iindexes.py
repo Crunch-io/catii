@@ -276,6 +276,24 @@ class TestReindexed:
         assert reindexed.common == 2
         assert reindexed.to_dict() == {(1,): [1, 3, 5]}
 
+    def test_reindex_merge(self):
+        idx = iindex({(99,): [1, 3, 5], (88,): [2, 4, 6]}, common=0, shape=(10,))
+
+        reindexed = idx.reindexed({99: 88}, shift=False)
+        assert reindexed.common == 0
+        assert reindexed.to_dict() == {(88,): [1, 2, 3, 4, 5, 6]}
+
+        # Merge uncommon into common
+        reindexed = idx.reindexed({88: 0}, shift=False)
+        assert reindexed.common == 0
+        assert reindexed.to_dict() == {(99,): [1, 3, 5]}
+
+        # Merge common into uncommon. Even with shift=False, the common shifts!
+        # Using shift is always about performance, not output!
+        reindexed = idx.reindexed({0: 88}, shift=False)
+        assert reindexed.common == 88
+        assert reindexed.to_dict() == {(99,): [1, 3, 5]}
+
     def test_reindex_dupes(self):
         idx = iindex({(99,): [1, 3, 5], (88,): [2, 4, 6]}, common=0, shape=(10,))
 

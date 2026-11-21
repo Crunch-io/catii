@@ -724,6 +724,11 @@ class iindex(dict):
     def reindexed(self, mapping=None, copy=True, shift=True, assume_unique=False):
         """Return a new iindex, whose entries contain mapped values.
 
+        The mapping may be partial, and may include the current common value
+        as an input or output. Entries that map to the output common value
+        (whether originally common or not) will not be output, as is typical
+        for the common value.
+
         The mapping may map multiple inputs to the same output; matching
         rowids will be merged in this case. If you can guarantee that
         there will be no duplicates (no merged coords for the same rowid),
@@ -738,6 +743,13 @@ class iindex(dict):
         are materialized copies of self. If False, they are shared.
         Use False only when self is already a temporary copy, or will not
         be persisted.
+
+        If `shift` is True (the default), AND any rowids were merged,
+        the new_common value is calculated by counting rowids in self.
+        (If nothing was merged, there is no need for this potentially
+        expensive calculation. You may manually shift_common if needed.)
+        Even if False: if the mapping maps the existing common value
+        to a new value, that will become the new common value.
         """
         if mapping is None:
             mapping = {k: i for i, k in enumerate(sorted(k[0] for k in self))}
@@ -751,15 +763,14 @@ class iindex(dict):
             if not hasattr(coords, "__iter__"):
                 coords = (coords,)
 
-            new_coord = mapping.get(coords[0])
+            new_coord = mapping.get(coords[0], coords[0])
             if new_coord == new_common:
-                # More than one coord maps to the new common coord.
+                # Map to the new common coord.
                 # Skip, but flag so that common is shifted below.
                 merged = True
                 continue
-            if new_coord is not None:
-                coords = (new_coord,) + coords[1:]
 
+            coords = (new_coord,) + coords[1:]
             v = new_entries.get(coords)
             if v is not None:
                 v.append(rowids)
