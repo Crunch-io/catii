@@ -43,6 +43,27 @@ jobs:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_APIKEY }}
         run: twine upload --skip-existing dist/*.tar.gz
+      - name: Check if version exists on Nexus
+        id: nexus_check
+        env:
+          NEXUS_USER: ${{ secrets.NEXUS_USER }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+        run: |
+          WHEEL_FILE=$(ls dist/*.whl | head -1)
+          VERSION=$(echo "$WHEEL_FILE" | sed -E 's/.*-([0-9]+\.[0-9]+\.[0-9]+[^-]*)-.*\.whl/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Checking if version $VERSION exists on Nexus..."
+          
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -u "$NEXUS_USER:$NEXUS_PASSWORD" \
+            "https://nexus.dev.crint.net/repository/packages/unstable/catii/${VERSION}/${WHEEL_FILE}")
+          
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "Version $VERSION already exists on Nexus"
+            exit 1
+          else
+            echo "Version $VERSION does not exist on Nexus (HTTP $HTTP_STATUS)"
+          fi
       - name: Publish wheel to Nexus unstable
         env:
           NEXUS_USER: ${{ secrets.NEXUS_USER }}
